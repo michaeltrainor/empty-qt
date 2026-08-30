@@ -1,0 +1,72 @@
+[project]
+name = "mtqt"
+version = "0.1.0"
+description = "Reusable PySide6 widgets, item models, and QSS for production Qt tools."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "mtd3v" }]
+requires-python = ">=3.13,<3.14"
+dependencies = ["pyside6>=6.8.0.2,<6.9"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+]
+keywords = ["pyside6", "qt", "widgets", "models", "vfx"]
+
+[project.urls]
+Homepage = "https://cursor.com/codebase/mtd3v/mtqt"
+Repository = "https://origin.cursor.com/mtd3v/mtqt.git"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-qt>=4.4",
+    "pytest-cov>=6.0",
+    "ruff>=0.12",
+    "pyright>=1.1.400",
+    "pre-commit>=4.2",
+]
+docs = [
+    "mkdocs-material>=9.6",
+    "mkdocstrings[python]>=0.29",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py313"
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+qt_api = "pyside6"
+testpaths = ["tests"]
+addopts = "--cov=mtqt --cov-report=term-missing"
+
+[tool.coverage.run]
+source_pkgs = ["mtqt"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
