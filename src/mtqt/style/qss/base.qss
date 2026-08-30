@@ -1,0 +1,88 @@
+/* mtqt base — app chrome. Tokens (literal colors for v1):
+   --bg: #1e1f22
+   --panel: #2b2d31
+   --text: #e8e8ea
+   --accent: #5b8def
+   --border: #3f4147
+*/
+
+QWidget {
+    background-color: #2b2d31;
+    color: #e8e8ea;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow {
+    background-color: #1e1f22;
+}
+
+QTabWidget::pane {
+    border: 1px solid #3f4147;
+    background: #2b2d31;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: #1e1f22;
+    color: #c8c8cc;
+    padding: 8px 14px;
+    border: 1px solid #3f4147;
+    border-bottom: none;
+}
+
+QTabBar::tab:selected {
+    background: #2b2d31;
+    color: #e8e8ea;
+}
+
+QPushButton {
+    background-color: #3d4149;
+    border: 1px solid #3f4147;
+    border-radius: 4px;
+    padding: 4px 12px;
+    min-height: 22px;
+}
+
+QPushButton:hover {
+    background-color: #4a4f59;
+}
+
+QPushButton:pressed {
+    background-color: #5b8def;
+    color: #ffffff;
+}
+
+QLineEdit {
+    background-color: #1e1f22;
+    border: 1px solid #3f4147;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #5b8def;
+}
+
+QListView,
+QTableView {
+    background-color: #1e1f22;
+    alternate-background-color: #25262a;
+    border: 1px solid #3f4147;
+    gridline-color: #3f4147;
+}
+
+QHeaderView::section {
+    background-color: #2b2d31;
+    color: #e8e8ea;
+    border: 1px solid #3f4147;
+    padding: 4px 8px;
+}
+
+QCheckBox {
+    spacing: 8px;
+}
+
+QPlainTextEdit {
+    background-color: #1e1f22;
+    border: 1px solid #3f4147;
+    font-family: "IBM Plex Mono", "Menlo", monospace;
+    font-size: 12px;
+}

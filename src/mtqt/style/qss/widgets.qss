@@ -1,0 +1,23 @@
+/* Composite widgets — objectName and dynamic properties. */
+
+LabeledLineEdit QLabel {
+    min-width: 72px;
+    color: #c8c8cc;
+}
+
+LabeledLineEdit QLineEdit {
+    min-width: 160px;
+}
+
+LabeledLineEdit[invalid="true"] QLineEdit {
+    border: 1px solid #c0392b;
+    background-color: #3a2224;
+}
+
+#PathPicker QLineEdit {
+    min-width: 200px;
+}
+
+#PathPickerBrowse {
+    min-width: 88px;
+}
