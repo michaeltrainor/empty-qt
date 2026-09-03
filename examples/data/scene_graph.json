@@ -1,0 +1,22 @@
+[
+  ["world",
+    ["persp"],
+    ["top"],
+    ["lgt",
+      ["key"],
+      ["fill"],
+      ["rim"]
+    ],
+    ["geo",
+      ["character",
+        ["body"],
+        ["head"],
+        ["hair"]
+      ],
+      ["environment",
+        ["ground"],
+        ["buildings"]
+      ]
+    ]
+  ]
+]

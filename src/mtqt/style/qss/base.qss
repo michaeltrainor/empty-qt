@@ -62,7 +62,8 @@ QLineEdit {
 }
 
 QListView,
-QTableView {
+QTableView,
+QTreeView {
     background-color: #1e1f22;
     alternate-background-color: #25262a;
     border: 1px solid #3f4147;

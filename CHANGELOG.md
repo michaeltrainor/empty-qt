@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `SceneGraphModel` / `SceneNode` for nested list-of-lists scene graphs, and
+  `SceneGraphTree` composing `QTreeView`.
+
 ## 0.1.0 — 2026-08-30
 
 Initial library: `LabeledLineEdit`, `PathPicker`, `ObjectListModel`,

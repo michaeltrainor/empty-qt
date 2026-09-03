@@ -1,6 +1,6 @@
 # Widgets
 
-v1 ships two composite widgets. Both take `parent: QWidget | None = None`, set `objectName` for QSS, and set an accessible name.
+v1 ships three composite widgets. All take `parent: QWidget | None = None`, set `objectName` for QSS, and set an accessible name.
 
 ## Composition, not multiple inheritance
 
@@ -27,6 +27,18 @@ from mtqt import PathPicker
 picker = PathPicker(parent=window, caption="Scene file")
 picker.path = Path("/tmp/scene.ma")
 picker.pathChanged.connect(lambda s: print(Path(s) if s else None))
+```
+
+## Scene graph tree
+
+`SceneGraphTree` **contains** a `QTreeView` bound to `SceneGraphModel`. Pass a nested list-of-lists forest or a JSON `path`. `currentNameChanged` emits the selected UID as `str`.
+
+```python
+from pathlib import Path
+from mtqt import SceneGraphTree
+
+tree = SceneGraphTree(parent=window, path=Path("scene_graph.json"))
+tree.currentNameChanged.connect(print)
 ```
 
 Do not grow this catalog in a drive-by change; add widgets deliberately.

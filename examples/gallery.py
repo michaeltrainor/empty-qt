@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -22,6 +23,7 @@ from mtqt import (
     ObjectListModel,
     ObjectTableModel,
     PathPicker,
+    SceneGraphTree,
     apply_stylesheet,
     ensure_application,
 )
@@ -50,6 +52,7 @@ class GalleryWindow(QMainWindow):
         tabs.addTab(self._build_widgets_tab(), "Widgets")
         tabs.addTab(self._build_list_tab(), "List")
         tabs.addTab(self._build_table_tab(), "Table")
+        tabs.addTab(self._build_tree_tab(), "Tree")
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
@@ -149,6 +152,46 @@ class GalleryWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.addWidget(view, stretch=2)
         layout.addWidget(snapshot, stretch=1)
+        return page
+
+    def _build_tree_tab(self) -> QWidget:
+        page = QWidget(self)
+        data_path = Path(__file__).parent / "data" / "scene_graph.json"
+        tree = SceneGraphTree(parent=page, path=data_path)
+
+        log = QPlainTextEdit(page)
+        log.setReadOnly(True)
+        log.setPlaceholderText("Selection log")
+        tree.currentNameChanged.connect(
+            lambda name: log.appendPlainText(f"currentNameChanged: {name!r}")
+        )
+
+        add = QPushButton("Add child", page)
+        remove = QPushButton("Remove selected", page)
+
+        def on_add() -> None:
+            parent = tree.view.currentIndex()
+            count = tree.model.rowCount(parent)
+            tree.model.append_child(parent, f"node_{count + 1}")
+            tree.view.expand(parent)
+
+        def on_remove() -> None:
+            index = tree.view.currentIndex()
+            if index.isValid():
+                tree.model.remove_row(index)
+
+        add.clicked.connect(on_add)
+        remove.clicked.connect(on_remove)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(add)
+        buttons.addWidget(remove)
+        buttons.addStretch()
+
+        layout = QVBoxLayout(page)
+        layout.addWidget(tree, stretch=2)
+        layout.addLayout(buttons)
+        layout.addWidget(log, stretch=1)
         return page
 
 

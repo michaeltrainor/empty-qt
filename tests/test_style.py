@@ -9,6 +9,7 @@ from mtqt.style import apply_stylesheet, load_stylesheet
 def test_load_stylesheet_contains_tokens() -> None:
     sheet = load_stylesheet("base", "widgets")
     assert "QMainWindow" in sheet
+    assert "QTreeView" in sheet
     assert "PathPicker" in sheet
     assert "[invalid=" in sheet
 
