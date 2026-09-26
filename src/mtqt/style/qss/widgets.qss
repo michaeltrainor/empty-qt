@@ -21,3 +21,13 @@ LabeledLineEdit[invalid="true"] QLineEdit {
 #PathPickerBrowse {
     min-width: 88px;
 }
+
+#NodeGraphView {
+    border: 1px solid #3f4147;
+    background-color: #1e1f22;
+}
+
+#NodeGraphDefaultContent {
+    background: transparent;
+    color: #e8e8ea;
+}

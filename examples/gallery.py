@@ -8,10 +8,12 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
+    QLabel,
     QListView,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTableView,
     QTabWidget,
     QVBoxLayout,
@@ -19,7 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from mtqt import (
+    DropWidget,
     LabeledLineEdit,
+    NodeGraph,
+    NodeGraphWidget,
     ObjectListModel,
     ObjectTableModel,
     PathPicker,
@@ -27,6 +32,7 @@ from mtqt import (
     apply_stylesheet,
     ensure_application,
 )
+from mtqt.widgets.node_graph import Node, Port, PortDirection
 
 
 @dataclass
@@ -53,6 +59,8 @@ class GalleryWindow(QMainWindow):
         tabs.addTab(self._build_list_tab(), "List")
         tabs.addTab(self._build_table_tab(), "Table")
         tabs.addTab(self._build_tree_tab(), "Tree")
+        tabs.addTab(self._build_drop_tab(), "Drop")
+        tabs.addTab(self._build_graph_tab(), "Graph")
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
@@ -192,6 +200,74 @@ class GalleryWindow(QMainWindow):
         layout.addWidget(tree, stretch=2)
         layout.addLayout(buttons)
         layout.addWidget(log, stretch=1)
+        return page
+
+    def _build_graph_tab(self) -> QWidget:
+        page = QWidget(self)
+        graph = NodeGraph()
+        graph.add_node(
+            Node(
+                "ingest",
+                "Ingest",
+                outputs=(Port("path", PortDirection.OUT, "path"),),
+                payload="plate.exr",
+            )
+        )
+        graph.add_node(
+            Node(
+                "grade",
+                "Grade",
+                inputs=(Port("path", PortDirection.IN, "path"),),
+                outputs=(Port("image", PortDirection.OUT, "image"),),
+            )
+        )
+        graph.add_node(
+            Node(
+                "write",
+                "Write",
+                inputs=(Port("image", PortDirection.IN, "image"),),
+                payload="graded.exr",
+            )
+        )
+        graph.connect("ingest", "path", "grade", "path")
+        graph.connect("grade", "image", "write", "image")
+        graph.arrange()
+
+        def content(node: Node, parent: QWidget | None) -> QWidget:
+            if node.id == "grade":
+                box = QWidget(parent)
+                layout = QVBoxLayout(box)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.addWidget(QLabel("Exposure", box))
+                exposure = QSpinBox(box)
+                exposure.setRange(-10, 10)
+                layout.addWidget(exposure)
+                return box
+            label = QLabel(str(node.payload or node.title), parent)
+            return label
+
+        canvas = NodeGraphWidget(graph, page, content_factory=content)
+        log = QPlainTextEdit(page)
+        log.setReadOnly(True)
+        log.setPlaceholderText("Graph log")
+        canvas.currentNodeChanged.connect(
+            lambda node_id: log.appendPlainText(f"currentNodeChanged: {node_id!r}")
+        )
+        canvas.connectionRejected.connect(
+            lambda message: log.appendPlainText(f"connectionRejected: {message}")
+        )
+        canvas.graphChanged.connect(lambda: log.appendPlainText("graphChanged"))
+
+        layout = QVBoxLayout(page)
+        layout.addWidget(canvas, stretch=2)
+        layout.addWidget(log, stretch=1)
+        return page
+
+    def _build_drop_tab(self) -> QWidget:
+        page = QWidget(self)
+        drop = DropWidget(page)
+        layout = QVBoxLayout(page)
+        layout.addWidget(drop, stretch=1)
         return page
 
 
