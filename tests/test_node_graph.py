@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QContextMenuEvent
+from PySide6.QtWidgets import QGraphicsSceneHoverEvent, QLabel, QWidget
 
 from mtqt import NodeGraph, NodeGraphWidget
 from mtqt.widgets.node_graph import (
@@ -14,6 +15,7 @@ from mtqt.widgets.node_graph import (
     Port,
     PortDirection,
 )
+from mtqt.widgets.node_graph.view import NodeGraphView
 
 
 def _port_in(name: str = "in", data_type: str = "any") -> Port:
@@ -236,3 +238,261 @@ def test_widget_set_graph_and_factory(qtbot) -> None:
     assert widget.view.zoom == pytest.approx(2.5)
     widget.view.set_zoom(0.01)
     assert widget.view.zoom == pytest.approx(0.25)
+
+
+def test_rewire_moves_edge_and_drop_on_empty_disconnects(qtbot) -> None:
+    graph = _chain()
+    graph.add_node(Node("d", "D", inputs=(_port_in(),), position=(30, 0)))
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    qtbot.addWidget(widget)
+    source_in = _port(widget, "b", PortDirection.IN)
+    free_in = _port(widget, "d", PortDirection.IN)
+
+    assert widget.scene.begin_rewire_from_input(source_in)
+    widget.scene.finish_draft(free_in.scenePos())
+    assert graph.incoming_edge("b", "in") is None
+    moved = graph.incoming_edge("d", "in")
+    assert moved is not None
+    assert moved.source_id == "a"
+
+    edge_item = widget.scene.edge_item(moved.id)
+    assert edge_item is not None
+    assert widget.scene.begin_rewire_from_edge(edge_item)
+    widget.scene.finish_draft(QPointF(-800, -800))
+    assert graph.incoming_edge("d", "in") is None
+    assert graph.incoming_edge("c", "in") is not None
+
+
+def test_rewire_drop_on_same_port_keeps_edge(qtbot) -> None:
+    graph = _chain()
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    qtbot.addWidget(widget)
+    inlet = _port(widget, "b", PortDirection.IN)
+    original = graph.incoming_edge("b", "in")
+    assert original is not None
+
+    assert widget.scene.begin_rewire_from_input(inlet)
+    widget.scene.finish_draft(inlet.scenePos())
+    kept = graph.incoming_edge("b", "in")
+    assert kept is not None
+    assert kept.id == original.id
+    item = widget.scene.edge_item(kept.id)
+    assert item is not None
+    assert item.isVisible()
+
+
+def test_rewire_rejects_cycle_and_restores_edge(qtbot) -> None:
+    graph = _chain()
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    qtbot.addWidget(widget)
+    inlet = _port(widget, "c", PortDirection.IN)
+    occupied = _port(widget, "a", PortDirection.IN)
+    assert not widget.scene.begin_rewire_from_input(occupied)
+
+    with qtbot.waitSignal(widget.connectionRejected) as blocker:
+        assert widget.scene.begin_rewire_from_input(inlet)
+        widget.scene.finish_draft(occupied.scenePos())
+    assert "cycle" in blocker.args[0]
+    restored = graph.incoming_edge("c", "in")
+    assert restored is not None
+    assert restored.source_id == "b"
+    assert restored.id == "edge-2"
+    item = widget.scene.edge_item("edge-2")
+    assert item is not None
+    assert item.isVisible()
+
+
+def test_add_node_at_uses_factory_and_default_ports(qtbot) -> None:
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(parent=host, frame_on_show=False)
+    qtbot.addWidget(widget)
+
+    created = widget.add_node_at((5, 6))
+    assert created.id == "node-1"
+    assert created.position == (5, 6)
+    assert tuple(port.name for port in created.inputs) == ("in",)
+    assert tuple(port.name for port in created.outputs) == ("out",)
+    assert widget.current_node_id == "node-1"
+    assert widget.scene.node_item("node-1") is not None
+
+    again = widget.add_node_at((1, 2))
+    assert again.id == "node-2"
+
+    def factory(position: tuple[float, float]) -> Node:
+        return Node("made", "Made", position=position)
+
+    widget.set_node_factory(factory)
+    custom = widget.add_node_at((8, 9))
+    assert custom.id == "made"
+    assert custom.position == (8, 9)
+    assert widget.current_node_id == "made"
+
+
+def test_background_menu_adds_node_and_item_click_does_not(qtbot) -> None:
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(parent=host, frame_on_show=False)
+    widget.resize(640, 480)
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.waitExposed(widget)
+    view = widget.view
+    opened: list[tuple[float, float]] = []
+
+    def record(_global_pos: QPoint, scene_position: tuple[float, float]) -> None:
+        opened.append(scene_position)
+
+    view._show_background_menu = record  # type: ignore[method-assign]
+    _context_menu(view, QPoint(8, 8))
+    assert len(opened) == 1
+    widget.add_node_at(opened[0])
+    assert [node.id for node in widget.graph.nodes()] == ["node-1"]
+
+    node_item = widget.scene.node_item("node-1")
+    assert node_item is not None
+    on_node = view.mapFromScene(node_item.sceneBoundingRect().center())
+    _context_menu(view, on_node)
+    assert opened == [opened[0]]
+
+
+def test_dragging_an_input_port_rewires_the_edge(qtbot) -> None:
+    graph = NodeGraph()
+    graph.add_node(Node("a", "A", outputs=(_port_out(),), position=(0, 80)))
+    graph.add_node(Node("b", "B", inputs=(_port_in(),), position=(360, 0)))
+    graph.add_node(Node("c", "C", inputs=(_port_in(),), position=(360, 220)))
+    graph.connect("a", "out", "b", "in")
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    widget.resize(900, 600)
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.waitExposed(widget)
+    view = widget.view
+    view.set_zoom(1)
+    start = _port(widget, "b", PortDirection.IN).sceneBoundingRect().center()
+    end = _port(widget, "c", PortDirection.IN).sceneBoundingRect().center()
+    view.centerOn(start)
+    viewport = view.viewport()
+    qtbot.mousePress(viewport, Qt.MouseButton.LeftButton, pos=view.mapFromScene(start))
+    qtbot.mouseMove(viewport, view.mapFromScene(end))
+    qtbot.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=view.mapFromScene(end))
+    moved = graph.incoming_edge("c", "in")
+    assert moved is not None
+    assert moved.source_id == "a"
+    assert graph.incoming_edge("b", "in") is None
+
+
+def test_hover_glows_the_node_and_brightens_the_edge(qtbot) -> None:
+    graph = _chain()
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    qtbot.addWidget(widget)
+    node = widget.scene.node_item("b")
+    edge = widget.scene.edge_item("edge-1")
+    assert node is not None
+    assert edge is not None
+    resting = edge.pen().color().name()
+
+    node.hoverEnterEvent(_hover(QEvent.Type.GraphicsSceneHoverEnter, QPointF(0, 0)))
+    assert node.hovered
+    inside = node.mapToScene(node.boundingRect().center())
+    node.hoverLeaveEvent(_hover(QEvent.Type.GraphicsSceneHoverLeave, inside))
+    assert node.hovered
+    outside = QPointF(-8000, -8000)
+    node.hoverLeaveEvent(_hover(QEvent.Type.GraphicsSceneHoverLeave, outside))
+    assert not node.hovered
+
+    edge.hoverEnterEvent(_hover(QEvent.Type.GraphicsSceneHoverEnter, QPointF(0, 0)))
+    assert edge.hovered
+    assert edge.pen().color().name() != resting
+    assert edge.pen().color().lightness() > QColor(resting).lightness()
+    edge.hoverLeaveEvent(_hover(QEvent.Type.GraphicsSceneHoverLeave, QPointF(0, 0)))
+    assert not edge.hovered
+    assert edge.pen().color().name() == resting
+
+    node.hoverEnterEvent(_hover(QEvent.Type.GraphicsSceneHoverEnter, QPointF(0, 0)))
+    widget.resize(640, 480)
+    widget.show()
+    qtbot.waitExposed(widget)
+    assert not widget.grab().isNull()
+
+
+def test_f_frames_the_selection(qtbot) -> None:
+    graph = NodeGraph()
+    graph.add_node(Node("a", "A", outputs=(_port_out(),), position=(0, 0)))
+    graph.add_node(Node("b", "B", inputs=(_port_in(),), position=(2400, 1600)))
+    host = QWidget()
+    qtbot.addWidget(host)
+    widget = NodeGraphWidget(graph, host, frame_on_show=False)
+    widget.resize(640, 480)
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.waitExposed(widget)
+    view = widget.view
+    qtbot.waitUntil(lambda: view.viewport().width() > 400)
+    view.set_zoom(1)
+    node_a = widget.scene.node_item("a")
+    node_b = widget.scene.node_item("b")
+    assert node_a is not None
+    assert node_b is not None
+
+    bounds = widget.scene.itemsBoundingRect()
+    qtbot.keyClick(view, Qt.Key.Key_F)
+    framed_all = _view_center(view)
+    assert abs(framed_all.x() - bounds.center().x()) < 30
+    assert abs(framed_all.y() - bounds.center().y()) < 30
+
+    node_b.setSelected(True)
+    qtbot.keyClick(view, Qt.Key.Key_F)
+    center = _view_center(view)
+    target = node_b.sceneBoundingRect().center()
+    other = node_a.sceneBoundingRect().center()
+    assert abs(center.x() - target.x()) < 30
+    assert abs(center.y() - target.y()) < 30
+    assert abs(center.x() - other.x()) > 400
+
+    framed = _view_center(view)
+    qtbot.keyClick(view, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+    held = _view_center(view)
+    assert abs(framed.x() - held.x()) < 2
+    assert abs(framed.y() - held.y()) < 2
+
+    node_a.setSelected(True)
+    qtbot.keyClick(view, Qt.Key.Key_F)
+    both = _view_center(view)
+    midpoint = (target.x() + other.x()) / 2
+    assert abs(both.x() - midpoint) < abs(both.x() - target.x())
+
+
+def _view_center(view: NodeGraphView) -> QPointF:
+    return view.mapToScene(view.viewport().rect().center())
+
+
+def _hover(kind: QEvent.Type, scene_pos: QPointF) -> QGraphicsSceneHoverEvent:
+    event = QGraphicsSceneHoverEvent(kind)
+    event.setScenePos(scene_pos)
+    event.setPos(scene_pos)
+    return event
+
+
+def _context_menu(view: NodeGraphView, viewport_pos: QPoint) -> None:
+    global_pos = view.viewport().mapToGlobal(viewport_pos)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, viewport_pos, global_pos)
+    view.contextMenuEvent(event)
+
+
+def _port(widget: NodeGraphWidget, node_id: str, direction: PortDirection):
+    item = widget.scene.node_item(node_id)
+    assert item is not None
+    port = item.port_item("in" if direction is PortDirection.IN else "out", direction)
+    assert port is not None
+    return port

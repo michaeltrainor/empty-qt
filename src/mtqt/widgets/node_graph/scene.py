@@ -14,24 +14,43 @@ from mtqt.widgets.node_graph.graph import (
     Node,
     NodeGraph,
     NodeGraphError,
+    Port,
     PortDirection,
 )
 from mtqt.widgets.node_graph.items import EdgeItem, NodeItem, PortItem
 
 NodeContentFactory = Callable[[Node, QWidget | None], QWidget]
+NodeFactory = Callable[[tuple[float, float]], Node]
+
+
+def default_node_at(graph: NodeGraph, position: tuple[float, float]) -> Node:
+    """A node with one ``any`` input and one ``any`` output at ``position``."""
+    index = 1
+    while graph.has_node(f"node-{index}"):
+        index += 1
+    return Node(
+        id=f"node-{index}",
+        title="Node",
+        inputs=(Port("in", PortDirection.IN),),
+        outputs=(Port("out", PortDirection.OUT),),
+        position=position,
+    )
 
 
 class NodeGraphScene(QGraphicsScene):
     """Graphics scene bound to one :class:`NodeGraph`.
 
     The scene subscribes to the graph and creates a :class:`NodeItem` per node.
-    Each item embeds the widget returned by ``content_factory``. The factory
-    must not mutate the graph.
+    With no ``content_factory``, a node is a title and its ports. A factory
+    may embed a widget in the body and must not mutate the graph.
 
     Args:
         graph: DAG to display. Existing nodes and edges are drawn immediately.
-        content_factory: Builds the widget embedded in a node.
+        content_factory: Builds the widget embedded in a node. ``None`` leaves
+            the body empty.
         parent: Qt owner.
+        node_factory: Builds the node inserted by :meth:`add_node_at`.
+            Defaults to :func:`default_node_at`.
     """
 
     connectionRejected = Signal(str)
@@ -39,16 +58,20 @@ class NodeGraphScene(QGraphicsScene):
     def __init__(
         self,
         graph: NodeGraph,
-        content_factory: NodeContentFactory,
+        content_factory: NodeContentFactory | None = None,
         parent: QWidget | None = None,
+        *,
+        node_factory: NodeFactory | None = None,
     ) -> None:
         super().__init__(parent)
         self._graph = graph
         self._factory = content_factory
+        self._node_factory = node_factory
         self._nodes: dict[str, NodeItem] = {}
         self._edges: dict[str, EdgeItem] = {}
         self._draft: EdgeItem | None = None
         self._draft_port: PortItem | None = None
+        self._rewire_edge_id = ""
         self._from_item = False
         self.setSceneRect(-4000, -4000, 8000, 8000)
         self._populate()
@@ -74,12 +97,41 @@ class NodeGraphScene(QGraphicsScene):
             return None
         return item.content_widget()
 
-    def set_content_factory(self, factory: NodeContentFactory) -> None:
-        """Replace the factory and rebuild every embedded widget."""
+    def set_content_factory(self, factory: NodeContentFactory | None) -> None:
+        """Replace the factory and rebuild every node body.
+
+        ``None`` clears the embedded widgets.
+        """
         self._factory = factory
         for node_id, item in self._nodes.items():
-            item.set_content(factory(self._graph.node(node_id), None))
+            self._apply_content(item, self._graph.node(node_id))
             self._refresh_incident_edges(node_id)
+
+    def set_node_factory(self, factory: NodeFactory | None) -> None:
+        """Replace the factory used by :meth:`add_node_at`.
+
+        ``None`` restores :func:`default_node_at`.
+        """
+        self._node_factory = factory
+
+    def add_node_at(self, position: tuple[float, float]) -> Node:
+        """Insert a node at a scene position and select it.
+
+        Uses ``node_factory`` when one is set. The factory receives
+        ``(x, y)`` and must return a node whose id is free. The default
+        factory names nodes ``node-1``, ``node-2``, and so on, each with
+        an ``in`` port and an ``out`` port of type ``any``.
+        """
+        if self._node_factory is not None:
+            node = self._node_factory(position)
+        else:
+            node = default_node_at(self._graph, position)
+        stored = self._graph.add_node(node)
+        item = self._nodes.get(stored.id)
+        if item is not None:
+            self.clearSelection()
+            item.setSelected(True)
+        return stored
 
     def bind(self, graph: NodeGraph) -> None:
         """Drop the current drawing and display ``graph``."""
@@ -123,13 +175,33 @@ class NodeGraphScene(QGraphicsScene):
         if port.direction is not PortDirection.OUT:
             return
         self._cancel_draft()
-        self._draft_port = port
-        draft = EdgeItem("")
-        draft.set_draft(True)
-        self.addItem(draft)
-        origin = port.scenePos()
-        draft.set_endpoints(origin, origin)
-        self._draft = draft
+        self._start_rubber_band(port, rewire_edge_id="")
+
+    def begin_rewire_from_input(self, port: PortItem) -> bool:
+        """Lift the edge feeding ``port`` so it can be dropped elsewhere.
+
+        Returns ``False`` when ``port`` is not a connected input. The edge
+        stays in the graph until :meth:`finish_draft`.
+        """
+        if port.direction is not PortDirection.IN:
+            return False
+        edge = self._graph.incoming_edge(port.node_id, port.port_name)
+        if edge is None:
+            return False
+        return self._begin_rewire(edge.id)
+
+    def begin_rewire_from_edge(self, edge_item: EdgeItem) -> bool:
+        """Lift ``edge_item`` so its free end can drop on another input.
+
+        Grabs the mouse on the rubber-band curve. Returns ``False`` when
+        the item is not a live edge.
+        """
+        if not edge_item.edge_id or not self._graph.has_edge(edge_item.edge_id):
+            return False
+        started = self._begin_rewire(edge_item.edge_id)
+        if started and self._draft is not None:
+            self._draft.grabMouse()
+        return started
 
     def update_draft(self, pos: QPointF) -> None:
         """Move the free end of the connection drag to ``pos``."""
@@ -137,23 +209,33 @@ class NodeGraphScene(QGraphicsScene):
             return
         self._draft.set_endpoints(self._draft_port.scenePos(), pos)
         target = self._port_at(pos)
-        rejected = False
-        if target is not None and target.direction is PortDirection.IN:
-            rejected = not self._graph.can_connect(
-                self._draft_port.node_id,
-                self._draft_port.port_name,
-                target.node_id,
-                target.port_name,
-            )
+        rejected = (
+            target is not None
+            and target.direction is PortDirection.IN
+            and not self._drop_acceptable(self._draft_port, target)
+        )
         self._draft.set_rejected(rejected)
 
     def finish_draft(self, pos: QPointF) -> None:
-        """Commit the connection drag, or cancel it when the drop is invalid."""
+        """Commit the connection drag.
+
+        A new drag connects when it lands on a compatible input. A rewire
+        dropped on empty space disconnects. A rewire dropped on an
+        incompatible port keeps the original edge and emits
+        ``connectionRejected``.
+        """
         source = self._draft_port
-        self._cancel_draft()
+        rewire_id = self._rewire_edge_id
+        self._discard_draft(restore_edge=False)
         if source is None:
+            if rewire_id:
+                self._show_edge(rewire_id)
+                self._refresh_edge(rewire_id)
             return
         target = self._port_at(pos)
+        if rewire_id and self._graph.has_edge(rewire_id):
+            self._finish_rewire(source, rewire_id, target)
+            return
         if target is None or target.direction is not PortDirection.IN:
             return
         try:
@@ -205,7 +287,7 @@ class NodeGraphScene(QGraphicsScene):
             tuple((port.name, port.data_type) for port in node.inputs),
             tuple((port.name, port.data_type) for port in node.outputs),
         )
-        item.set_content(self._factory(node, None))
+        self._apply_content(item, node)
         item.apply_position(QPointF(*node.position))
         self._nodes[node.id] = item
 
@@ -226,8 +308,14 @@ class NodeGraphScene(QGraphicsScene):
             tuple((port.name, port.data_type) for port in node.inputs),
             tuple((port.name, port.data_type) for port in node.outputs),
         )
-        item.set_content(self._factory(node, None))
+        self._apply_content(item, node)
         self._refresh_incident_edges(node_id)
+
+    def _apply_content(self, item: NodeItem, node: Node) -> None:
+        if self._factory is None:
+            item.set_content(None)
+            return
+        item.set_content(self._factory(node, None))
 
     def _add_edge_item(self, edge_id: str) -> None:
         if edge_id in self._edges or not self._graph.has_edge(edge_id):
@@ -263,6 +351,107 @@ class NodeGraphScene(QGraphicsScene):
             target.anchor(edge.target_port, PortDirection.IN),
         )
 
+    def _start_rubber_band(self, port: PortItem, *, rewire_edge_id: str) -> None:
+        self._draft_port = port
+        self._rewire_edge_id = rewire_edge_id
+        draft = EdgeItem("")
+        draft.set_draft(True)
+        self.addItem(draft)
+        origin = port.scenePos()
+        draft.set_endpoints(origin, origin)
+        self._draft = draft
+
+    def _begin_rewire(self, edge_id: str) -> bool:
+        edge = self._graph.edge(edge_id)
+        source_item = self._nodes.get(edge.source_id)
+        if source_item is None:
+            return False
+        output = source_item.port_item(edge.source_port, PortDirection.OUT)
+        if output is None:
+            return False
+        self._cancel_draft()
+        self._start_rubber_band(output, rewire_edge_id=edge_id)
+        original = self._edges.get(edge_id)
+        if original is not None:
+            original.setVisible(False)
+        return True
+
+    def _drop_acceptable(self, source: PortItem, target: PortItem) -> bool:
+        if self._rewire_edge_id and self._graph.has_edge(self._rewire_edge_id):
+            edge = self._graph.edge(self._rewire_edge_id)
+            if (
+                target.node_id == edge.target_id
+                and target.port_name == edge.target_port
+                and source.node_id == edge.source_id
+                and source.port_name == edge.source_port
+            ):
+                return True
+        return self._graph.can_connect(
+            source.node_id,
+            source.port_name,
+            target.node_id,
+            target.port_name,
+        )
+
+    def _finish_rewire(
+        self,
+        source: PortItem,
+        rewire_id: str,
+        target: PortItem | None,
+    ) -> None:
+        edge = self._graph.edge(rewire_id)
+        if target is None or target.direction is not PortDirection.IN:
+            self._graph.disconnect(rewire_id)
+            return
+        if target.node_id == edge.target_id and target.port_name == edge.target_port:
+            self._show_edge(rewire_id)
+            self._refresh_edge(rewire_id)
+            return
+        origin = (
+            edge.source_id,
+            edge.source_port,
+            edge.target_id,
+            edge.target_port,
+            edge.id,
+        )
+        self._graph.disconnect(rewire_id)
+        try:
+            self._graph.connect(
+                source.node_id,
+                source.port_name,
+                target.node_id,
+                target.port_name,
+            )
+        except NodeGraphError as exc:
+            self._graph.connect(
+                origin[0],
+                origin[1],
+                origin[2],
+                origin[3],
+                edge_id=origin[4],
+            )
+            self.connectionRejected.emit(str(exc))
+
+    def _show_edge(self, edge_id: str) -> None:
+        item = self._edges.get(edge_id)
+        if item is not None:
+            item.setVisible(True)
+
+    def _discard_draft(self, *, restore_edge: bool) -> None:
+        draft = self._draft
+        rewire_id = self._rewire_edge_id
+        self._draft = None
+        self._draft_port = None
+        self._rewire_edge_id = ""
+        if draft is not None:
+            if self.mouseGrabberItem() is draft:
+                draft.ungrabMouse()
+            if draft.scene() is not None:
+                self.removeItem(draft)
+        if restore_edge and rewire_id:
+            self._show_edge(rewire_id)
+            self._refresh_edge(rewire_id)
+
     def _port_at(self, pos: QPointF) -> PortItem | None:
         for item in self.items(pos):
             if isinstance(item, PortItem):
@@ -275,10 +464,7 @@ class NodeGraphScene(QGraphicsScene):
         return None
 
     def _cancel_draft(self) -> None:
-        if self._draft is not None:
-            self.removeItem(self._draft)
-        self._draft = None
-        self._draft_port = None
+        self._discard_draft(restore_edge=True)
 
     def _clear_items(self) -> None:
         self._cancel_draft()

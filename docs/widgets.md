@@ -43,10 +43,9 @@ tree.currentNameChanged.connect(print)
 
 ## Node graph
 
-`NodeGraphWidget` draws a directed acyclic graph and embeds a `QWidget` in each node. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.
+`NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.
 
 ```python
-from PySide6.QtWidgets import QLabel
 from mtqt import NodeGraph, NodeGraphWidget
 from mtqt.widgets.node_graph import Node, Port, PortDirection
 
@@ -63,16 +62,18 @@ graph.add_node(
 )
 graph.connect("read", "out", "grade", "in")
 
-def content(node, parent):
-    label = QLabel(str(node.payload or node.title), parent)
-    return label
-
-canvas = NodeGraphWidget(graph, parent=window, content_factory=content)
+canvas = NodeGraphWidget(graph, parent=window)
 canvas.currentNodeChanged.connect(print)
 ```
 
 `connect` raises `CycleError` when the new edge would loop, and `NodeGraphError` when a port is missing, types disagree, or an input already has an edge. Outputs may fan out. `topological_order` is a safe evaluation order. `to_dict` / `from_dict` round-trip the structure; `payload` is stored as a Python object, not JSON.
 
-Drag an output socket onto an input to connect. A rejected drop emits `connectionRejected`. Delete removes the selected nodes and edges through the same graph object. Replace the embedded widgets with `set_content_factory`. The factory must not mutate the graph.
+Drag an output socket onto an input to connect. Drag a connected input, or the wire, to move that connection onto another input. Drop it on empty canvas to disconnect. A rejected drop emits `connectionRejected` and leaves the original wire in place. Port names are drawn inside the node, next to each socket. Hovering a node draws a thin bright glow around its border. Hovering a wire brightens that wire. Right-click empty canvas and choose Add node to insert a node at the cursor. `set_node_factory` replaces that node. Delete removes the selected nodes and edges through the same graph object. ``F`` centers the view on the selection and zooms it to fit. With nothing selected, ``F`` frames every object in the scene.
+
+Middle-drag, Alt-drag, and Space-drag pan the canvas. Space pans only while the view has focus, so an embedded editor still receives the space bar. The wheel zooms toward the cursor.
+
+`GraphHistory` records those edits. `NodeGraphWidget.history` is one, and Ctrl+Z undoes the last gesture when the canvas has focus. Ctrl+Y and Ctrl+Shift+Z redo it. One gesture is one step: deleting a node restores its wires with it, and a node drag restores the position where the drag started. A focused embedded editor keeps its own undo. `undo()` and `redo()` return false when the stack is empty.
+
+The node body is the header and the port names. `content_factory` can still embed a widget there later; leave it unset for this frame.
 
 Do not grow this catalog in a drive-by change; add widgets deliberately.

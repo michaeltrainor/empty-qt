@@ -8,12 +8,10 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
-    QLabel,
     QListView,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QTableView,
     QTabWidget,
     QVBoxLayout,
@@ -44,11 +42,134 @@ class Person:
         return f"{self.name} ({self.role})"
 
 
+def _in(name: str, data_type: str) -> Port:
+    return Port(name, PortDirection.IN, data_type)
+
+
+def _out(name: str, data_type: str) -> Port:
+    return Port(name, PortDirection.OUT, data_type)
+
+
+def _shader_graph() -> NodeGraph:
+    """A small lit-surface shader: constants, maps, and a wide master node."""
+    graph = NodeGraph()
+    graph.add_node(Node("uv", "UV", outputs=(_out("UV", "uv"),)))
+    graph.add_node(Node("time", "Time", outputs=(_out("t", "float"),)))
+    graph.add_node(Node("height", "Height", outputs=(_out("Value", "float"),)))
+    graph.add_node(Node("depth", "Depth Scale", outputs=(_out("Value", "float"),)))
+    graph.add_node(Node("tint", "Tint", outputs=(_out("RGB", "color"),)))
+    graph.add_node(Node("metal", "Metal", outputs=(_out("Value", "float"),)))
+    graph.add_node(Node("rough", "Roughness Amount", outputs=(_out("Value", "float"),)))
+    graph.add_node(Node("power", "Pow", outputs=(_out("x", "float"),)))
+    graph.add_node(Node("emission", "Emission", outputs=(_out("RGB", "color"),)))
+    graph.add_node(
+        Node(
+            "parallax",
+            "Parallax Occlusion Mapping",
+            inputs=(
+                _in("UV", "uv"),
+                _in("Height", "float"),
+                _in("Scale", "float"),
+            ),
+            outputs=(_out("UV", "uv"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "albedo",
+            "Sample Albedo",
+            inputs=(_in("UV", "uv"),),
+            outputs=(_out("RGB", "color"), _out("A", "float")),
+        )
+    )
+    graph.add_node(
+        Node(
+            "normal",
+            "Sample Normal",
+            inputs=(_in("UV", "uv"),),
+            outputs=(_out("Normal", "vec3"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "multiply",
+            "Multiply",
+            inputs=(_in("A", "color"), _in("B", "color")),
+            outputs=(_out("Product", "color"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "add",
+            "Add",
+            inputs=(_in("A", "float"), _in("B", "float")),
+            outputs=(_out("Sum", "float"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "fresnel",
+            "Fresnel",
+            inputs=(_in("Normal", "vec3"), _in("Power", "float")),
+            outputs=(_out("Mask", "float"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "lerp",
+            "Lerp",
+            inputs=(
+                _in("A", "color"),
+                _in("B", "color"),
+                _in("T", "float"),
+            ),
+            outputs=(_out("Result", "color"),),
+        )
+    )
+    graph.add_node(
+        Node(
+            "surface",
+            "Lit Surface",
+            inputs=(
+                _in("Base Color", "color"),
+                _in("Metallic", "float"),
+                _in("Roughness", "float"),
+                _in("Normal", "vec3"),
+                _in("Emission", "color"),
+                _in("Ambient Occlusion", "float"),
+                _in("Opacity", "float"),
+            ),
+        )
+    )
+    graph.connect("uv", "UV", "parallax", "UV")
+    graph.connect("height", "Value", "parallax", "Height")
+    graph.connect("depth", "Value", "parallax", "Scale")
+    graph.connect("parallax", "UV", "albedo", "UV")
+    graph.connect("parallax", "UV", "normal", "UV")
+    graph.connect("albedo", "RGB", "multiply", "A")
+    graph.connect("tint", "RGB", "multiply", "B")
+    graph.connect("time", "t", "add", "A")
+    graph.connect("power", "x", "add", "B")
+    graph.connect("normal", "Normal", "fresnel", "Normal")
+    graph.connect("add", "Sum", "fresnel", "Power")
+    graph.connect("multiply", "Product", "lerp", "A")
+    graph.connect("tint", "RGB", "lerp", "B")
+    graph.connect("fresnel", "Mask", "lerp", "T")
+    graph.connect("lerp", "Result", "surface", "Base Color")
+    graph.connect("metal", "Value", "surface", "Metallic")
+    graph.connect("rough", "Value", "surface", "Roughness")
+    graph.connect("normal", "Normal", "surface", "Normal")
+    graph.connect("emission", "RGB", "surface", "Emission")
+    graph.connect("albedo", "A", "surface", "Ambient Occlusion")
+    graph.connect("albedo", "A", "surface", "Opacity")
+    return graph
+
+
 class GalleryWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("mtqt gallery")
-        self.resize(720, 520)
+        self.resize(1920, 1080)
 
         self._use_qss = QCheckBox("Use mtqt stylesheet", self)
         self._use_qss.setChecked(True)
@@ -204,49 +325,10 @@ class GalleryWindow(QMainWindow):
 
     def _build_graph_tab(self) -> QWidget:
         page = QWidget(self)
-        graph = NodeGraph()
-        graph.add_node(
-            Node(
-                "ingest",
-                "Ingest",
-                outputs=(Port("path", PortDirection.OUT, "path"),),
-                payload="plate.exr",
-            )
-        )
-        graph.add_node(
-            Node(
-                "grade",
-                "Grade",
-                inputs=(Port("path", PortDirection.IN, "path"),),
-                outputs=(Port("image", PortDirection.OUT, "image"),),
-            )
-        )
-        graph.add_node(
-            Node(
-                "write",
-                "Write",
-                inputs=(Port("image", PortDirection.IN, "image"),),
-                payload="graded.exr",
-            )
-        )
-        graph.connect("ingest", "path", "grade", "path")
-        graph.connect("grade", "image", "write", "image")
-        graph.arrange()
+        graph = _shader_graph()
+        graph.arrange(x_gap=420, y_gap=150)
 
-        def content(node: Node, parent: QWidget | None) -> QWidget:
-            if node.id == "grade":
-                box = QWidget(parent)
-                layout = QVBoxLayout(box)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.addWidget(QLabel("Exposure", box))
-                exposure = QSpinBox(box)
-                exposure.setRange(-10, 10)
-                layout.addWidget(exposure)
-                return box
-            label = QLabel(str(node.payload or node.title), parent)
-            return label
-
-        canvas = NodeGraphWidget(graph, page, content_factory=content)
+        canvas = NodeGraphWidget(graph, page)
         log = QPlainTextEdit(page)
         log.setReadOnly(True)
         log.setPlaceholderText("Graph log")

@@ -5,6 +5,7 @@ from mtqt.models import ObjectListModel, ObjectTableModel, SceneGraphModel, Scen
 from mtqt.style import apply_stylesheet, load_stylesheet
 from mtqt.widgets import (
     DropWidget,
+    GraphHistory,
     LabeledLineEdit,
     NodeGraph,
     NodeGraphWidget,
@@ -15,6 +16,7 @@ from mtqt.widgets import (
 __version__ = version("mtqt")
 
 __all__ = [
+    "GraphHistory",
     "LabeledLineEdit",
     "NodeGraph",
     "NodeGraphWidget",
