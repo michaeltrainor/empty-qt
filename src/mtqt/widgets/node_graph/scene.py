@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import shiboken6
 from PySide6.QtCore import QPointF, Signal
-from PySide6.QtWidgets import QGraphicsScene, QWidget
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent, QWidget
 
 from mtqt.widgets.node_graph.graph import (
     GraphChange,
@@ -247,6 +247,39 @@ class NodeGraphScene(QGraphicsScene):
             )
         except NodeGraphError as exc:
             self.connectionRejected.emit(str(exc))
+
+    def title_editor_has_focus(self) -> bool:
+        """Whether an open header editor owns Delete and Backspace."""
+        return any(item.title_editor_has_focus() for item in self._nodes.values())
+
+    def commit_renames(self, scene_pos: QPointF | None = None) -> None:
+        """Commit header editors that do not contain ``scene_pos``.
+
+        ``None`` commits every open editor. A blank title keeps the previous
+        name. The editor under ``scene_pos`` stays open.
+        """
+        for item in list(self._nodes.values()):
+            if item.title_editor() is None:
+                continue
+            if scene_pos is not None and item._title_editor_contains(scene_pos):
+                continue
+            item._commit_rename()
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        """Commit a header rename when the press lands outside its editor."""
+        self.commit_renames(event.scenePos())
+        super().mousePressEvent(event)
+
+    def rename_node(self, node_id: str, title: str) -> None:
+        """Set the header text of ``node_id``.
+
+        A blank title is ignored. The graph emits ``NODE_CHANGED`` when the
+        text differs, so undo records the rename with other edits.
+        """
+        cleaned = title.strip()
+        if not cleaned or not self._graph.has_node(node_id):
+            return
+        self._graph.change_node(node_id, title=cleaned)
 
     def node_moved(self, node_id: str, position: tuple[float, float]) -> None:
         """Write a dragged item position back to the graph."""
