@@ -23,6 +23,9 @@
   (Gallery, LabeledLineEdit, PathPicker, SceneGraphTree, NodeGraph, and
   DropWidget), including widgets launched outside the gallery.
 - Add pytest-qt tests for every public widget.
+- Require Google-style docstrings, ruff, and MkDocs updates when a PR is
+  ready. Every merged PR updates this changelog first. The pr-reviewer
+  agent reviews a ready PR and squash-merges it when the review passes.
 
 ## 0.1.0 — 2026-08-30
 

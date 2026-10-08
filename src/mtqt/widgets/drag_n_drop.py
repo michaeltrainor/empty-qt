@@ -1,9 +1,16 @@
-"""Standalone gallery that imports mtqt like a production tool."""
+"""QWidget drop target that accepts file drops and draws a dashed area."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import (QColor, QDragEnterEvent, QDropEvent, QPaintEvent, QPainter, QPen)
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+)
 from PySide6.QtWidgets import QWidget
 
 from mtqt import (
@@ -18,6 +25,15 @@ _LABEL_PIXEL_SIZE = 16
 
 
 class DropWidget(QWidget):
+    """A ``QWidget`` drop target that accepts file drops.
+
+    Draws a dashed ``Drop Here`` area and can be shown as a window.
+
+    Args:
+        parent: Qt parent. ``None`` means Python owns this widget until it
+            is parented or goes out of scope.
+    """
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -66,6 +82,11 @@ class DropWidget(QWidget):
 
 
 def main() -> int:
+    """Show ``DropWidget`` as a window and run the event loop.
+
+    Returns:
+        Process exit code.
+    """
     app = ensure_application()
 
     widget = DropWidget()
