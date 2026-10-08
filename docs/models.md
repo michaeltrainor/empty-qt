@@ -42,7 +42,8 @@ If `columns` is omitted and the first row is a dataclass, field names are inferr
 from mtqt import SceneGraphModel
 
 forest = [
-    ["world",
+    [
+        "world",
         ["persp"],
         ["geo", ["cube"]],
     ]
