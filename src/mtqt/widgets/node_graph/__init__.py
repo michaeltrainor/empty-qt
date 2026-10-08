@@ -5,6 +5,7 @@ Import the graph types and the widget from this package:
 .. code-block:: python
 
     from mtqt.widgets.node_graph import (
+        GraphHistory,
         Node,
         NodeGraph,
         NodeGraphWidget,
@@ -13,7 +14,8 @@ Import the graph types and the widget from this package:
     )
 
 ``NodeGraph`` is a directed acyclic graph with no Qt dependency. ``NodeGraphWidget``
-observes one graph and embeds a custom ``QWidget`` in each node.
+observes one graph and draws each node as a title and its ports. ``GraphHistory``
+records undo steps for that graph.
 """
 
 from mtqt.widgets.node_graph.graph import (
@@ -29,7 +31,8 @@ from mtqt.widgets.node_graph.graph import (
     PortDirection,
     ports_compatible,
 )
-from mtqt.widgets.node_graph.scene import NodeContentFactory
+from mtqt.widgets.node_graph.history import GraphHistory
+from mtqt.widgets.node_graph.scene import NodeContentFactory, NodeFactory
 from mtqt.widgets.node_graph.widget import NodeGraphWidget
 
 __all__ = [
@@ -37,9 +40,11 @@ __all__ = [
     "Edge",
     "GraphChange",
     "GraphEvent",
+    "GraphHistory",
     "GraphListener",
     "Node",
     "NodeContentFactory",
+    "NodeFactory",
     "NodeGraph",
     "NodeGraphError",
     "NodeGraphWidget",
