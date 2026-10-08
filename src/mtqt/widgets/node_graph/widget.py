@@ -41,10 +41,13 @@ class NodeGraphWidget(QWidget):
     moving a node updates the canvas. Each node is a title and its ports.
     Drag an output socket onto an input to connect. Drag a connected input,
     or the wire itself, to move that connection; drop it on empty canvas to
-    disconnect. Right-click empty canvas to add a node. Middle-drag,
-    Alt-drag, and Space-drag pan. Delete removes the selection. Ctrl+Z
-    undoes the last gesture when the view or its viewport has focus. Ctrl+Y
-    and Ctrl+Shift+Z redo it.
+    disconnect. Right-click empty canvas to add a node. Double-click a node
+    header to rename it. Enter or a click elsewhere commits the title, and
+    Escape cancels. A blank title is left unchanged. Middle-drag, Alt-drag,
+    and Space-drag pan. Delete and Backspace remove the selection. While a
+    header editor has focus, those keys edit the title instead. Ctrl+Z undoes
+    the last gesture when the view or its viewport has focus. Ctrl+Y and
+    Ctrl+Shift+Z redo it.
 
     ``content_factory`` is optional. When set, it receives the stored node
     and should return a widget embedded in the body. Read ``node.payload``

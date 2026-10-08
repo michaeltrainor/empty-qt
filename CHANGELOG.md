@@ -19,6 +19,10 @@
   brightens it.
 - Node graph: press ``F`` to frame the current selection, or every object
   when nothing is selected.
+- Node graph: double-click a node header to rename it. Enter or a click
+  elsewhere commits the title, and Escape cancels. A blank title is left
+  unchanged. While the editor has focus, Delete and Backspace edit the
+  text. After the edit ends, they remove the selection again.
 - Add a standalone example and a VS Code debug launcher for each widget
   (Gallery, LabeledLineEdit, PathPicker, SceneGraphTree, NodeGraph, and
   DropWidget), including widgets launched outside the gallery.

@@ -27,9 +27,13 @@ class NodeGraphView(QGraphicsView):
 
     Wheel zooms toward the cursor. Middle-drag, Alt-drag, and Space-drag pan.
     Space-drag applies only while this view or its viewport has focus, so a
-    focused editor still receives Space. Delete removes the selection through
-    the graph. ``F`` frames the selection, or every item when nothing is
-    selected. Right-click on empty canvas opens a menu that adds a node.
+    focused editor still receives Space. Delete and Backspace remove the
+    selection through the graph. While a header editor has focus, the view
+    leaves keys to that editor, so those keys edit its text. ``F`` frames the
+    selection, or every item when nothing is selected. Double-click a node
+    header to rename it. Enter or a
+    click elsewhere commits the title, and Escape cancels. Right-click on
+    empty canvas opens a menu that adds a node.
     Embedded widgets keep their own key events while they have focus.
 
     Args:
@@ -148,6 +152,9 @@ class NodeGraphView(QGraphicsView):
             self._scene.add_node_at(scene_position)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._scene.title_editor_has_focus():
+            super().keyPressEvent(event)
+            return
         if self._handle_space_press(event):
             return
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):

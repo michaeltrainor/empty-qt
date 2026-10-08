@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from collections.abc import Callable
+
+import shiboken6
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QKeyEvent,
     QPainter,
     QPainterPath,
     QPainterPathStroker,
     QPen,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsObject,
     QGraphicsPathItem,
     QGraphicsProxyWidget,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
+    QLineEdit,
     QStyle,
     QStyleOptionGraphicsItem,
     QWidget,
@@ -47,6 +53,17 @@ _HOVER_SPREAD = 3.0
 _MIN_WIDTH = 180.0
 _MIN_CONTENT = 28.0
 _PORT_SLOT = 28.0
+_TITLE_EDITOR_QSS = (
+    "QLineEdit {"
+    " background: #34363c;"
+    " color: #e8e8ea;"
+    " border: 1px solid #5b8def;"
+    " border-radius: 3px;"
+    " padding: 0px;"
+    " selection-background-color: #5b8def;"
+    " selection-color: #e8e8ea;"
+    "}"
+)
 
 
 def _ui_font(*, bold: bool) -> QFont:
@@ -324,8 +341,33 @@ class EdgeItem(QGraphicsPathItem):
         self.setPen(pen)
 
 
+class _TitleEditor(QLineEdit):
+    """Single-line editor shown over a node header while it is renamed."""
+
+    def __init__(self, on_cancel: Callable[[], None]) -> None:
+        super().__init__()
+        self._on_cancel = on_cancel
+        self.setObjectName("NodeTitleEditor")
+        self.setAccessibleName("Node title")
+        self.setFont(_title_font())
+        self.setStyleSheet(_TITLE_EDITOR_QSS)
+        self.setFrame(False)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and not event.isAutoRepeat():
+            self._on_cancel()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class NodeItem(QGraphicsObject):
-    """Framed node with a title and ports."""
+    """Framed node with a title and ports.
+
+    Double-click the header to rename the node. Enter, or a click outside
+    the editor, commits the stripped title. Escape, or a blank title, keeps
+    the previous one.
+    """
 
     def __init__(self, node_id: str, title: str) -> None:
         super().__init__()
@@ -341,6 +383,11 @@ class NodeItem(QGraphicsObject):
         self._left_label_w = 0.0
         self._right_label_w = 0.0
         self._hovered = False
+        self._editing = False
+        self._rename_closing = False
+        self._rename_cancel = False
+        self._title_edit: _TitleEditor | None = None
+        self._title_proxy: QGraphicsProxyWidget | None = None
         self._ports: dict[tuple[str, PortDirection], PortItem] = {}
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, True)
@@ -357,9 +404,87 @@ class NodeItem(QGraphicsObject):
         return self._title
 
     def set_title(self, title: str) -> None:
-        """Replace the header text."""
+        """Replace the header text and size the frame to fit.
+
+        An open rename is discarded so a graph update wins over typed text.
+        """
+        if self._editing and not self._rename_closing:
+            self._detach_editor()
+        if title == self._title:
+            self.update()
+            return
         self._title = title
+        self.relayout()
+
+    def title_editor(self) -> QLineEdit | None:
+        """Header editor while a rename is in progress, otherwise ``None``."""
+        if not self._editing:
+            return None
+        return self._title_edit
+
+    def title_editor_has_focus(self) -> bool:
+        """Whether the open header editor owns Delete and Backspace.
+
+        The canvas keeps widget focus and forwards ordinary keys to the
+        editor. Those two keys must follow the same path instead of removing
+        the node.
+        """
+        edit = self._title_edit
+        proxy = self._title_proxy
+        if not self._editing or edit is None or not shiboken6.isValid(edit):
+            return False
+        if QApplication.focusWidget() is edit:
+            return True
+        scene = self.scene()
+        if (
+            proxy is None
+            or scene is None
+            or not shiboken6.isValid(proxy)
+            or not shiboken6.isValid(scene)
+        ):
+            return False
+        return scene.focusItem() is proxy
+
+    def begin_rename(self) -> None:
+        """Open an editor over the header.
+
+        Enter writes the stripped title through the scene. Escape, or a
+        blank title, leaves the previous title in place.
+        """
+        if self._rename_closing or not shiboken6.isValid(self):
+            return
+        if self._editing and self._title_edit is not None:
+            self._focus_title_editor()
+            return
+        edit = self._title_edit
+        if edit is None:
+            edit = _TitleEditor(self._cancel_rename)
+            edit.editingFinished.connect(self._commit_rename)
+            self._ensure_title_proxy().setWidget(edit)
+            self._title_edit = edit
+        edit.blockSignals(True)
+        edit.setText(self._title)
+        edit.blockSignals(False)
+        self._editing = True
+        self._rename_cancel = False
+        self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, False)
+        self._place_title_editor()
+        proxy = self._title_proxy
+        if proxy is not None:
+            proxy.show()
         self.update()
+        self._focus_title_editor()
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+            and self._header_rect().contains(event.pos())
+        ):
+            self.begin_rename()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def set_content(self, widget: QWidget | None) -> None:
         """Embed ``widget`` in the body, or clear it when ``widget`` is ``None``."""
@@ -448,6 +573,7 @@ class NodeItem(QGraphicsObject):
             widget.resize(int(content_w), int(content_h))
         self._place_ports(PortDirection.IN, 0.0)
         self._place_ports(PortDirection.OUT, width)
+        self._place_title_editor()
         self.update()
 
     def apply_position(self, position: QPointF) -> None:
@@ -512,13 +638,14 @@ class NodeItem(QGraphicsObject):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(body, 6, 6)
 
-        painter.setPen(_TEXT)
-        painter.setFont(_title_font())
-        painter.drawText(
-            header.adjusted(_HEADER_INSET, 0, -_HEADER_INSET, 0),
-            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
-            self._title,
-        )
+        if not self._editing:
+            painter.setPen(_TEXT)
+            painter.setFont(_title_font())
+            painter.drawText(
+                header.adjusted(_HEADER_INSET, 0, -_HEADER_INSET, 0),
+                int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                self._title,
+            )
         self._paint_port_labels(painter)
 
     def itemChange(
@@ -536,6 +663,121 @@ class NodeItem(QGraphicsObject):
             if callable(moved):
                 moved(self.node_id, (value.x(), value.y()))
         return result
+
+    def _header_rect(self) -> QRectF:
+        height = min(_TITLE_HEIGHT, self._size.height())
+        return QRectF(self._size.left(), self._size.top(), self._size.width(), height)
+
+    def _ensure_title_proxy(self) -> QGraphicsProxyWidget:
+        proxy = self._title_proxy
+        if proxy is not None:
+            return proxy
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsSelectable, False)
+        proxy.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, False)
+        proxy.setZValue(2)
+        proxy.hide()
+        self._title_proxy = proxy
+        return proxy
+
+    def _place_title_editor(self) -> None:
+        edit = self._title_edit
+        proxy = self._title_proxy
+        if not self._editing or edit is None or proxy is None:
+            return
+        rect = self._header_rect().adjusted(_HEADER_INSET, 4, -_HEADER_INSET, -4)
+        if rect.width() < 1 or rect.height() < 1:
+            return
+        proxy.setPos(rect.topLeft())
+        proxy.resize(rect.size())
+        edit.setFixedSize(max(int(rect.width()), 1), max(int(rect.height()), 1))
+
+    def _focus_title_editor(self) -> None:
+        edit = self._title_edit
+        proxy = self._title_proxy
+        if edit is None or proxy is None or not shiboken6.isValid(edit):
+            return
+        proxy.setFocus(Qt.FocusReason.MouseFocusReason)
+        edit.setFocus(Qt.FocusReason.MouseFocusReason)
+        QTimer.singleShot(0, self._select_title_text)
+
+    def _select_title_text(self) -> None:
+        edit = self._title_edit
+        if not self._editing or edit is None or not shiboken6.isValid(edit):
+            return
+        edit.selectAll()
+
+    def _cancel_rename(self) -> None:
+        self._rename_cancel = True
+        self._commit_rename()
+
+    def _commit_rename(self) -> None:
+        if self._rename_closing or not self._editing or self._title_edit is None:
+            return
+        if not shiboken6.isValid(self):
+            return
+        edit = self._title_edit
+        title = edit.text().strip()
+        cancel = self._rename_cancel
+        self._rename_closing = True
+        self._rename_cancel = False
+        self._detach_editor()
+        try:
+            if cancel or not title or title == self._title or self.scene() is None:
+                return
+            rename = getattr(self.scene(), "rename_node", None)
+            if callable(rename):
+                rename(self.node_id, title)
+        finally:
+            self._rename_closing = False
+
+    def _detach_editor(self) -> None:
+        edit = self._title_edit
+        proxy = self._title_proxy
+        self._editing = False
+        if edit is not None and shiboken6.isValid(edit):
+            edit.blockSignals(True)
+            edit.clearFocus()
+        if proxy is not None and shiboken6.isValid(proxy):
+            proxy.hide()
+            proxy.clearFocus()
+        self._focus_canvas()
+        if edit is not None and shiboken6.isValid(edit):
+            edit.blockSignals(False)
+        if shiboken6.isValid(self):
+            self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsMovable, True)
+            self.update()
+
+    def _title_editor_contains(self, scene_pos: QPointF) -> bool:
+        proxy = self._title_proxy
+        if not self._editing or proxy is None or not shiboken6.isValid(proxy):
+            return False
+        if not proxy.isVisible():
+            return False
+        return proxy.sceneBoundingRect().contains(scene_pos)
+
+    def _focus_canvas(self) -> None:
+        scene = self.scene()
+        if scene is None or not shiboken6.isValid(scene):
+            return
+        view = next((item for item in scene.views() if shiboken6.isValid(item)), None)
+        if view is None:
+            return
+
+        def focus() -> None:
+            if (
+                not shiboken6.isValid(self)
+                or self._editing
+                or not shiboken6.isValid(view)
+            ):
+                return
+            window = view.window()
+            if window is not None and shiboken6.isValid(window):
+                window.activateWindow()
+            view.setFocus(Qt.FocusReason.OtherFocusReason)
+
+        # Hide of the editor clears focus on the next turn. Restore it after.
+        QTimer.singleShot(0, focus)
 
     def _paint_hover_glow(self, painter: QPainter, body: QRectF) -> None:
         if not self._hovered:
