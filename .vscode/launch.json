@@ -1,0 +1,102 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Gallery",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/gallery.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "LabeledLineEdit",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/labeled_line_edit.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "PathPicker",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/path_picker.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "SceneGraphTree",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/scene_graph_tree.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "NodeGraph",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/node_graph.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "DropWidget",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/drop_widget.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "DropWidget module",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/mtqt/widgets/drag_n_drop.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests", "-q", "--no-cov"],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    }
+  ]
+}
