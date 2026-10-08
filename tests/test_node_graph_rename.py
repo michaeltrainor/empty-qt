@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QLineEdit, QWidget
 
 from mtqt.widgets.node_graph import (
@@ -12,6 +13,20 @@ from mtqt.widgets.node_graph import (
     Port,
     PortDirection,
 )
+
+
+def _title_past_minimum() -> str:
+    """Title whose header is wider than the 180px floor on this machine's font."""
+    font = QFont()
+    font.setFamilies(["IBM Plex Sans", "Segoe UI"])
+    font.setPixelSize(13)
+    font.setBold(True)
+    metrics = QFontMetrics(font)
+    title = "Upstream Plate"
+    # Matches NodeItem._title_width: advance + header inset * 2 + 4.
+    while metrics.horizontalAdvance(title) + 28 <= 180 and len(title) < 400:
+        title += " M"
+    return title
 
 
 def _show(qtbot, graph: NodeGraph) -> tuple[QWidget, NodeGraphWidget]:
@@ -84,11 +99,12 @@ def test_double_click_header_renames_and_undoes(qtbot) -> None:
     qtbot.keyClick(view, Qt.Key.Key_Backspace)
     assert graph.has_node("a")
     assert edit.text() == ""
-    qtbot.keyClicks(view, "  Upstream Plate  ")
+    title = _title_past_minimum()
+    qtbot.keyClicks(view, f"  {title}  ")
     qtbot.keyClick(edit, Qt.Key.Key_Return)
     assert item.title_editor() is None
-    assert graph.node("a").title == "Upstream Plate"
-    assert item.title == "Upstream Plate"
+    assert graph.node("a").title == title
+    assert item.title == title
     assert item.boundingRect().width() > before
 
     qtbot.waitUntil(widget.view.hasFocus)
@@ -96,8 +112,8 @@ def test_double_click_header_renames_and_undoes(qtbot) -> None:
     assert graph.node("a").title == "A"
     assert item.title == "A"
     qtbot.keyClick(widget.view, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
-    assert graph.node("a").title == "Upstream Plate"
-    assert item.title == "Upstream Plate"
+    assert graph.node("a").title == title
+    assert item.title == title
     item.setSelected(True)
     qtbot.keyClick(widget.view, Qt.Key.Key_Backspace)
     assert not graph.has_node("a")
