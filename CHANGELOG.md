@@ -19,6 +19,10 @@
   brightens it.
 - Node graph: press ``F`` to frame the current selection, or every object
   when nothing is selected.
+- Add a standalone example and a VS Code debug launcher for each widget
+  (Gallery, LabeledLineEdit, PathPicker, SceneGraphTree, NodeGraph, and
+  DropWidget), including widgets launched outside the gallery.
+- Add pytest-qt tests for every public widget.
 
 ## 0.1.0 — 2026-08-30
 
