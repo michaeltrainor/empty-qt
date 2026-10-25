@@ -31,12 +31,20 @@ Run a single launcher without opening the gallery:
 uv run python examples/labeled_line_edit.py
 ```
 
+`examples/scene_viewport.py` draws with rendercanvas. That dependency group is not part of a normal sync:
+
+```bash
+uv sync --extra dev --extra docs --group examples
+uv run --group examples python examples/scene_viewport.py
+```
+
 Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.json`, debugpy, integrated terminal):
 
 - Gallery — `examples/gallery.py`
 - LabeledLineEdit — `examples/labeled_line_edit.py`
 - PathPicker — `examples/path_picker.py`
 - SceneGraphTree — `examples/scene_graph_tree.py`
+- SceneViewport — `examples/scene_viewport.py`
 - NodeGraph — `examples/node_graph.py`
 - DropWidget — `examples/drop_widget.py`
 - DropWidget module — `src/mtqt/widgets/drag_n_drop.py`

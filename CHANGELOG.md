@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `examples/scene_viewport.py`: a main window with `SceneGraphTree` on the
+  left and a rendercanvas viewport on the right. The two are not connected.
+  Install that stack with `uv sync --extra dev --extra docs --group examples`.
 - Add `SceneGraphModel` / `SceneNode` for nested list-of-lists scene graphs, and
   `SceneGraphTree` composing `QTreeView`.
 - Add `mtqt.widgets.node_graph`: a Qt-free DAG (`NodeGraph`) and

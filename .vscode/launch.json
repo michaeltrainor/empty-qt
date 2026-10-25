@@ -38,6 +38,18 @@
       }
     },
     {
+      "name": "SceneViewport",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/scene_viewport.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "SceneGraphTree",
       "type": "debugpy",
       "request": "launch",

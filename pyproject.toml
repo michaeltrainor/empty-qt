@@ -7,7 +7,10 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "mtd3v" }]
 requires-python = ">=3.13,<3.14"
-dependencies = ["pyside6>=6.8.0.2,<6.9"]
+dependencies = [
+    "pyside6>=6.8.0.2,<6.9",
+    "pyside6-qtads>=4.3.1.4",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications :: Qt",
@@ -19,6 +22,13 @@ classifiers = [
     "Topic :: Software Development :: User Interfaces",
 ]
 keywords = ["pyside6", "qt", "widgets", "models", "vfx"]
+
+[dependency-groups]
+examples = [
+    "wgpu",
+    "rendercanvas",
+    "pygfx",
+]
 
 [project.urls]
 Homepage = "https://cursor.com/codebase/mtd3v/mtqt"
