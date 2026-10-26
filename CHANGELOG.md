@@ -2,9 +2,18 @@
 
 ## Unreleased
 
-- Fix directional shadows: positive near/far frustum, lower bias, shared
-  light aim target, and ground planes default to cast-shadow off (stops
-  peter-panning / detached contact shadows).
+- Fix light shadows for all kinds: directional positive near/far frustum,
+  point/spot depth pinning (pygfx resets near≈0 each frame), shared light
+  aim for directional/spot, Create → Spot Light, and ground planes default
+  to cast-shadow off (stops peter-panning / detached contact shadows).
+- Scene viewport: draw transform gizmos above meshes (no depth occlusion);
+  drop AxesHelper in favor of red/blue X/Z center lines on the ground grid.
+- Scene viewport: Maya-style shading hotkeys **1**–**6** (bounding box,
+  wireframe on shaded, flat, wireframe, shaded, textured) via the Shading
+  menu. Textured mode samples optional per-mesh ``albedo_map`` (UV
+  primitives + QImage load).
+- Scene viewport: ``SceneWorld`` owns component tables and shape indexes
+  (not a full ECS); window/history/IO go through that façade.
 - Scene viewport rendering: `MeshStandardMaterial` (roughness/metalness),
   outline-only selection, procedural studio IBL/skybox, exposure/gamma and
   shadow cull in Preferences, and tighter camera near/far on Frame.

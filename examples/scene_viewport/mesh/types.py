@@ -20,8 +20,10 @@ class MeshBuffers:
         positions: Vertex positions, shape ``(N, 3)``.
         normals: Per-vertex normals, shape ``(N, 3)``.
         indices: Triangle indices, shape ``(T, 3)``.
+        texcoords: UV coordinates, shape ``(N, 2)``.
     """
 
     positions: NDArray[np.float32]
     normals: NDArray[np.float32]
     indices: NDArray[np.uint32]
+    texcoords: NDArray[np.float32]

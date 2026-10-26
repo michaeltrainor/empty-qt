@@ -29,7 +29,11 @@ class AppSettings(BaseModel):
         description="World or local for new objects and the toolbar.",
     )
     show_grid: bool = Field(default=True, title="Show Grid")
-    show_axes: bool = Field(default=True, title="Show Axes")
+    show_axes: bool = Field(
+        default=True,
+        title="Show Axes",
+        description="Tint the grid's center X (red) and Z (blue) lines.",
+    )
     grid_size: float = Field(
         default=40.0,
         ge=2.0,
@@ -43,12 +47,6 @@ class AppSettings(BaseModel):
         le=200,
         title="Grid Divisions",
         description="Cells along each axis (size/divisions = cell size).",
-    )
-    axes_size: float = Field(
-        default=2.0,
-        ge=0.1,
-        le=50.0,
-        title="Axes Size",
     )
     gizmo_size: float = Field(
         default=100.0,

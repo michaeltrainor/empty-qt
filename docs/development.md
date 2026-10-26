@@ -45,12 +45,14 @@ uv run --group examples python -m examples.scene_viewport
 Maya-style tools via `MayaTransformGizmo` (`examples/scene_viewport/gizmo.py`), wrapping `pygfx.TransformGizmo`:
 
 - **Tools** (toolbar + hotkeys): **Q** select, **W** move, **E** rotate, **R** scale; **D** edit pivot (affect pivot only).
+- **Shading** (**1**–**6**): bounding box, wireframe on shaded, flat, wireframe, shaded, textured (optional `albedo_map` on Mesh).
+- **Document model**: `SceneWorld` owns transform/mesh/light tables and indexes; not a full ECS.
 - **Space**: toolbar World / Local (default world). Session preference drives the gizmo and Transform tab; TRS stays stored local.
 - **Pivot**: each transform stores a local `pivot`; the gizmo sits on a proxy at that offset (average of selection for multi-select; orientation from the last selected). Edit Pivot moves the offset without moving geometry.
 - **Hierarchy**: Edit → Parent to Last Selected (**P**) / Unparent (**Shift+P**) keep world pose.
 - **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, reparent, rename, and visibility.
 - **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; **F** frame; Ctrl+I isolate / Ctrl+Shift+I show all; `visible` on the Transform tab.
-- **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); selection is outline-only; Preferences cover exposure, gamma, skybox/gradient, and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached).
+- **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); optional albedo path; selection is outline-only; Preferences cover exposure, gamma, skybox/gradient, and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached). Point/spot shadows pin perspective near/far after pygfx's per-frame reset. No shared material library.
 - **Write-back**: Drag updates the local store; the properties book refreshes on pointer release.
 - **Not in scope yet**: snapping, screen space, custom HDRIs.
 

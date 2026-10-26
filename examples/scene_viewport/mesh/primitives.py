@@ -14,12 +14,18 @@ def _box_arrays(
     width: float,
     height: float,
     depth: float,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.uint32]]:
+) -> tuple[
+    NDArray[np.float32],
+    NDArray[np.float32],
+    NDArray[np.uint32],
+    NDArray[np.float32],
+]:
     hx = width * 0.5
     hy = height * 0.5
     hz = depth * 0.5
     positions = np.empty((24, 3), dtype=np.float32)
     normals = np.empty((24, 3), dtype=np.float32)
+    texcoords = np.empty((24, 2), dtype=np.float32)
     # +X
     positions[0] = (hx, -hy, -hz)
     positions[1] = (hx, hy, -hz)
@@ -74,29 +80,44 @@ def _box_arrays(
         indices[face, 1] = base + 2
         indices[face, 2] = base + 3
         face += 1
-    return positions, normals, indices
+    for base in range(0, 24, 4):
+        texcoords[base] = (0.0, 0.0)
+        texcoords[base + 1] = (0.0, 1.0)
+        texcoords[base + 2] = (1.0, 1.0)
+        texcoords[base + 3] = (1.0, 0.0)
+    return positions, normals, indices, texcoords
 
 
 @njit(cache=True)
 def _plane_arrays(
     width: float,
     depth: float,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.uint32]]:
+) -> tuple[
+    NDArray[np.float32],
+    NDArray[np.float32],
+    NDArray[np.uint32],
+    NDArray[np.float32],
+]:
     hx = width * 0.5
     hz = depth * 0.5
     positions = np.empty((4, 3), dtype=np.float32)
     normals = np.empty((4, 3), dtype=np.float32)
+    texcoords = np.empty((4, 2), dtype=np.float32)
     positions[0] = (-hx, 0.0, -hz)
     positions[1] = (hx, 0.0, -hz)
     positions[2] = (hx, 0.0, hz)
     positions[3] = (-hx, 0.0, hz)
+    texcoords[0] = (0.0, 0.0)
+    texcoords[1] = (1.0, 0.0)
+    texcoords[2] = (1.0, 1.0)
+    texcoords[3] = (0.0, 1.0)
     for i in range(4):
         normals[i] = (0.0, 1.0, 0.0)
     # CCW when viewed from +Y so winding matches the +Y normals.
     indices = np.empty((2, 3), dtype=np.uint32)
     indices[0] = (0, 2, 1)
     indices[1] = (0, 3, 2)
-    return positions, normals, indices
+    return positions, normals, indices, texcoords
 
 
 @njit(cache=True)
@@ -104,10 +125,16 @@ def _uv_sphere_arrays(
     radius: float,
     stacks: int,
     slices: int,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.uint32]]:
+) -> tuple[
+    NDArray[np.float32],
+    NDArray[np.float32],
+    NDArray[np.uint32],
+    NDArray[np.float32],
+]:
     vertex_count = (stacks + 1) * (slices + 1)
     positions = np.empty((vertex_count, 3), dtype=np.float32)
     normals = np.empty((vertex_count, 3), dtype=np.float32)
+    texcoords = np.empty((vertex_count, 2), dtype=np.float32)
     pi = np.pi
     v = 0
     for i in range(stacks + 1):
@@ -124,6 +151,8 @@ def _uv_sphere_arrays(
             normals[v, 0] = x
             normals[v, 1] = y
             normals[v, 2] = z
+            texcoords[v, 0] = j / slices
+            texcoords[v, 1] = i / stacks
             v += 1
 
     tri_count = stacks * slices * 2
@@ -142,19 +171,29 @@ def _uv_sphere_arrays(
             indices[t, 1] = b + 1
             indices[t, 2] = b
             t += 1
-    return positions, normals, indices
+    return positions, normals, indices, texcoords
 
 
 def box(width: float = 1.0, height: float = 1.0, depth: float = 1.0) -> MeshBuffers:
     """Axis-aligned box centered at the origin."""
-    positions, normals, indices = _box_arrays(width, height, depth)
-    return MeshBuffers(positions=positions, normals=normals, indices=indices)
+    positions, normals, indices, texcoords = _box_arrays(width, height, depth)
+    return MeshBuffers(
+        positions=positions,
+        normals=normals,
+        indices=indices,
+        texcoords=texcoords,
+    )
 
 
 def plane(width: float = 1.0, depth: float = 1.0) -> MeshBuffers:
     """XZ plane centered at the origin, normal +Y."""
-    positions, normals, indices = _plane_arrays(width, depth)
-    return MeshBuffers(positions=positions, normals=normals, indices=indices)
+    positions, normals, indices, texcoords = _plane_arrays(width, depth)
+    return MeshBuffers(
+        positions=positions,
+        normals=normals,
+        indices=indices,
+        texcoords=texcoords,
+    )
 
 
 def uv_sphere(
@@ -166,5 +205,10 @@ def uv_sphere(
     if stacks < 2 or slices < 3:
         msg = "stacks must be >= 2 and slices >= 3"
         raise ValueError(msg)
-    positions, normals, indices = _uv_sphere_arrays(radius, stacks, slices)
-    return MeshBuffers(positions=positions, normals=normals, indices=indices)
+    positions, normals, indices, texcoords = _uv_sphere_arrays(radius, stacks, slices)
+    return MeshBuffers(
+        positions=positions,
+        normals=normals,
+        indices=indices,
+        texcoords=texcoords,
+    )

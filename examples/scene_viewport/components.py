@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -88,6 +89,11 @@ class MeshComponent(BaseModel):
         ge=0.0,
         le=1.0,
         title="Metalness",
+    )
+    albedo_map: Path = Field(
+        default=Path(""),
+        title="Albedo Map",
+        description="Optional color texture path. Empty uses Color. Mode 6 shows it.",
     )
     cast_shadow: bool = Field(default=True, title="Cast Shadow")
     receive_shadow: bool = Field(default=True, title="Receive Shadow")
