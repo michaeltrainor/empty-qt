@@ -14,6 +14,7 @@ def to_geometry(buffers: MeshBuffers) -> gfx.Geometry:
         positions=buffers.positions,
         normals=buffers.normals,
         indices=buffers.indices,
+        texcoords=buffers.texcoords,
     )
 
 

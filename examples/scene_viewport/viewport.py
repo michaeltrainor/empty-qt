@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Literal
 
 import numpy as np
 import pygfx as gfx
@@ -24,6 +25,7 @@ from examples.scene_viewport.gizmo import (
 )
 from examples.scene_viewport.mesh.geometry import geometry_for
 from examples.scene_viewport.settings import AppSettings
+from examples.scene_viewport.textures import load_albedo_texture
 from examples.scene_viewport.xform_math import (
     as_vec3,
     average_positions,
@@ -33,9 +35,29 @@ from examples.scene_viewport.xform_math import (
 )
 
 _OUTLINE_COLOR = "#5eb0ff"
+_DRAW_WIRE_COLOR = "#1c1c1c"
+_BBOX_COLOR = "#c8c8c8"
+_BBOX_SELECTED_COLOR = "#5eb0ff"
 _ADDITIVE_MODIFIERS = frozenset({"Shift", "Control", "Meta"})
 
 Vec3 = tuple[float, float, float]
+DrawMode = Literal[
+    "bounding_box",
+    "wire_shaded",
+    "flat",
+    "wireframe",
+    "shaded",
+    "textured",
+]
+_LIT_DRAW_MODES = frozenset({"shaded", "textured", "wire_shaded"})
+DRAW_MODE_HOTKEYS: tuple[tuple[str, DrawMode, str], ...] = (
+    ("1", "bounding_box", "Bounding Box"),
+    ("2", "wire_shaded", "Wireframe on Shaded"),
+    ("3", "flat", "Flat"),
+    ("4", "wireframe", "Wireframe"),
+    ("5", "shaded", "Shaded"),
+    ("6", "textured", "Textured"),
+)
 
 
 class ViewportController:
@@ -68,7 +90,10 @@ class ViewportController:
         self._groups: dict[str, gfx.Group] = {}
         self._pivots: dict[str, Vec3] = {}
         self._meshes: dict[str, gfx.Mesh] = {}
+        self._mesh_components: dict[str, MeshComponent] = {}
         self._outlines: dict[str, gfx.Mesh] = {}
+        self._draw_wires: dict[str, gfx.Mesh] = {}
+        self._bboxes: dict[str, gfx.Line] = {}
         self._lights: dict[str, gfx.Light] = {}
         self._light_helpers: dict[str, gfx.WorldObject] = {}
         self._mesh_to_transform: dict[str, str] = {}
@@ -78,6 +103,7 @@ class ViewportController:
         self._transform_to_lights: dict[str, list[str]] = {}
         self._updating = False
         self._interaction_tool: InteractionTool = "select"
+        self._draw_mode: DrawMode = "shaded"
         self._affect_pivot = False
         self._drag_active = False
         self._drag_rels: dict[str, np.ndarray] = {}
@@ -85,8 +111,8 @@ class ViewportController:
         self._background: gfx.Background | None = None
         self._ambient: gfx.AmbientLight | None = None
         self._grid: gfx.GridHelper | None = None
-        self._axes: gfx.AxesHelper | None = None
         self._env_map: gfx.Texture | None = None
+        self._albedo_cache: dict[str, gfx.Texture | None] = {}
         self._light_aim: gfx.WorldObject | None = None
 
         self.renderer = gfx.renderers.WgpuRenderer(
@@ -229,8 +255,22 @@ class ViewportController:
         for outline in self._outlines.values():
             outline.material.wireframe_thickness = thickness
 
-    def _mesh_material(self, component: MeshComponent) -> gfx.MeshStandardMaterial:
-        return gfx.MeshStandardMaterial(
+    def _albedo_texture(self, component: MeshComponent) -> gfx.Texture | None:
+        """Return a cached albedo texture for ``component``, if any."""
+        key = str(component.albedo_map).strip()
+        if not key:
+            return None
+        if key not in self._albedo_cache:
+            self._albedo_cache[key] = load_albedo_texture(component.albedo_map)
+        return self._albedo_cache[key]
+
+    def _mesh_material(
+        self,
+        component: MeshComponent,
+        *,
+        textured: bool = False,
+    ) -> gfx.MeshStandardMaterial:
+        material = gfx.MeshStandardMaterial(
             color=component.color,
             roughness=component.roughness,
             metalness=component.metalness,
@@ -238,6 +278,123 @@ class ViewportController:
             env_map_intensity=self._effective_env_intensity(),
             pick_write=True,
         )
+        if textured:
+            texture = self._albedo_texture(component)
+            if texture is not None:
+                material.map = gfx.TextureMap(texture)
+        return material
+
+    @property
+    def draw_mode(self) -> DrawMode:
+        """Active viewport shading / draw mode."""
+        return self._draw_mode
+
+    def set_draw_mode(self, mode: DrawMode) -> None:
+        """Switch Maya-style viewport draw mode (hotkeys 1–6).
+
+        Args:
+            mode: ``bounding_box``, ``wire_shaded``, ``flat``, ``wireframe``,
+                ``shaded``, or ``textured`` (textured matches shaded until maps).
+        """
+        valid = {item[1] for item in DRAW_MODE_HOTKEYS}
+        if mode not in valid:
+            msg = f"unsupported draw mode {mode!r}"
+            raise ValueError(msg)
+        if mode == self._draw_mode:
+            return
+        self._draw_mode = mode
+        for name in self._meshes:
+            self._apply_draw_mode_to_mesh(name)
+        self._apply_highlights()
+        self._canvas.request_draw()
+
+    def _basic_mesh_material(
+        self,
+        component: MeshComponent,
+        *,
+        wireframe: bool = False,
+    ) -> gfx.MeshBasicMaterial:
+        return gfx.MeshBasicMaterial(
+            color=component.color,
+            wireframe=wireframe,
+            wireframe_thickness=self._settings.outline_thickness,
+            pick_write=True,
+        )
+
+    def _apply_draw_mode_to_mesh(self, name: str) -> None:
+        """Rebuild materials / visibility for one mesh under the active mode."""
+        mesh = self._meshes.get(name)
+        component = self._mesh_components.get(name)
+        if mesh is None or component is None:
+            return
+        mode = self._draw_mode
+        bbox = self._bboxes.get(name)
+        draw_wire = self._draw_wires.get(name)
+        lit = mode in _LIT_DRAW_MODES
+
+        mesh.visible = mode != "bounding_box"
+        if bbox is not None:
+            bbox.visible = mode == "bounding_box"
+        if draw_wire is not None:
+            draw_wire.visible = mode == "wire_shaded"
+
+        if mode == "bounding_box":
+            mesh.cast_shadow = False
+            mesh.receive_shadow = False
+            return
+
+        if mode == "wireframe":
+            mesh.material = self._basic_mesh_material(component, wireframe=True)
+        elif mode == "flat":
+            mesh.material = self._basic_mesh_material(component)
+        else:
+            # shaded, textured, wire_shaded
+            mesh.material = self._mesh_material(
+                component,
+                textured=(mode == "textured"),
+            )
+
+        mesh.cast_shadow = bool(component.cast_shadow and lit)
+        mesh.receive_shadow = bool(component.receive_shadow and lit)
+
+    @staticmethod
+    def _aabb_line_geometry(mesh: gfx.Mesh) -> gfx.Geometry:
+        """Build 12 line segments for the mesh geometry AABB."""
+        bounds = mesh.get_geometry_bounding_box()
+        mn = np.asarray(bounds[0], dtype=np.float32)
+        mx = np.asarray(bounds[1], dtype=np.float32)
+        corners = np.array(
+            [
+                [mn[0], mn[1], mn[2]],
+                [mx[0], mn[1], mn[2]],
+                [mx[0], mx[1], mn[2]],
+                [mn[0], mx[1], mn[2]],
+                [mn[0], mn[1], mx[2]],
+                [mx[0], mn[1], mx[2]],
+                [mx[0], mx[1], mx[2]],
+                [mn[0], mx[1], mx[2]],
+            ],
+            dtype=np.float32,
+        )
+        edges = (
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        )
+        positions = np.empty((len(edges) * 2, 3), dtype=np.float32)
+        for index, (start, end) in enumerate(edges):
+            positions[index * 2] = corners[start]
+            positions[index * 2 + 1] = corners[end]
+        return gfx.Geometry(positions=positions)
 
     @property
     def selected_names(self) -> list[str]:
@@ -400,6 +557,7 @@ class ViewportController:
         self._pivots[component.name] = component.pivot
         group.visible = component.visible
         if not self._drag_active:
+            self.refresh_shadows_for_transforms([component.name])
             self._sync_gizmo_target()
         self._canvas.request_draw()
 
@@ -538,6 +696,7 @@ class ViewportController:
         group.world.position = position
         local_position, local_rotation, local_scale = self.read_local_trs(name)
         if not self._drag_active:
+            self.refresh_shadows_for_transforms([name])
             self._sync_gizmo_target()
         self._canvas.request_draw()
         return TransformComponent(
@@ -615,18 +774,15 @@ class ViewportController:
 
     def apply_mesh(self, component: MeshComponent) -> None:
         """Push material and shadow flags from ``component`` onto its mesh."""
-        mesh = self._meshes.get(component.name)
-        if mesh is None:
+        if component.name not in self._meshes:
             return
-        material = mesh.material
-        material.color = component.color
-        if isinstance(material, gfx.MeshStandardMaterial):
-            material.roughness = component.roughness
-            material.metalness = component.metalness
-            material.env_map = self._env_map
-            material.env_map_intensity = self._effective_env_intensity()
-        mesh.cast_shadow = component.cast_shadow
-        mesh.receive_shadow = component.receive_shadow
+        # Drop cached albedo so path edits / file replacements reload.
+        key = str(component.albedo_map).strip()
+        if key:
+            self._albedo_cache.pop(key, None)
+        self._mesh_components[component.name] = component.model_copy(deep=True)
+        self._apply_draw_mode_to_mesh(component.name)
+        self._apply_highlights()
         self._canvas.request_draw()
 
     def add_transform(self, component: TransformComponent) -> None:
@@ -690,7 +846,12 @@ class ViewportController:
         mesh = self._meshes.pop(name, None)
         if mesh is None:
             return
+        self._mesh_components.pop(name, None)
         outline = self._outlines.pop(name, None)
+        draw_wire = self._draw_wires.pop(name, None)
+        bbox = self._bboxes.pop(name, None)
+        if bbox is not None:
+            self._helper_to_transform.pop(bbox.name, None)
         transform = self._mesh_to_transform.pop(name, None)
         if transform is not None:
             meshes = self._transform_to_meshes.get(transform, [])
@@ -699,8 +860,9 @@ class ViewportController:
         parent = mesh.parent
         if parent is not None:
             parent.remove(mesh)
-        if outline is not None and outline.parent is not None:
-            outline.parent.remove(outline)
+        for child in (outline, draw_wire, bbox):
+            if child is not None and child.parent is not None:
+                child.parent.remove(child)
         self._apply_highlights()
         self._canvas.request_draw()
 
@@ -764,7 +926,7 @@ class ViewportController:
         light.color = component.color
         light.intensity = component.intensity
         light.cast_shadow = component.cast_shadow
-        if isinstance(light, gfx.PointLight):
+        if isinstance(light, (gfx.PointLight, gfx.SpotLight)):
             light.distance = component.distance
             light.decay = component.decay
         if component.cast_shadow:
@@ -786,12 +948,57 @@ class ViewportController:
             current = parent if parent.name in self._groups else None
         return False
 
+    def _shadow_reach(self, light: gfx.Light) -> float:
+        """World-unit reach used for perspective shadow far planes."""
+        distance = float(getattr(light, "distance", 0.0) or 0.0)
+        # ``0`` means unlimited illumination — still clamp the shadow frustum.
+        if distance <= 0.0:
+            return 40.0
+        return max(distance, 4.0)
+
+    def _pin_perspective_shadow_depth(
+        self,
+        light: gfx.Light,
+        *,
+        near: float,
+        far: float,
+    ) -> None:
+        """Keep a sane near/far after pygfx overwrites depth each frame.
+
+        Point/Spot shadow ``_update_matrix`` sets
+        ``depth_range = (far / 1e6, far)``, which is effectively near≈0 and
+        causes the same contact gap we saw on directionals.
+        """
+        shadow = light.shadow
+        shadow._mtqt_shadow_near = float(near)
+        shadow._mtqt_shadow_far = float(max(far, near + 1.0))
+        if getattr(shadow, "_mtqt_depth_pinned", False):
+            return
+
+        original = shadow._update_matrix
+
+        def _update_matrix(
+            light_obj: gfx.Light,
+            *,
+            _original=original,
+            _shadow=shadow,
+        ) -> None:
+            _original(light_obj)
+            pinned_near = float(_shadow._mtqt_shadow_near)
+            pinned_far = float(_shadow._mtqt_shadow_far)
+            _shadow.camera.depth_range = (
+                pinned_near,
+                max(pinned_far, pinned_near + 1.0),
+            )
+
+        shadow._update_matrix = _update_matrix  # type: ignore[method-assign]
+        shadow._mtqt_depth_pinned = True
+
     def _configure_light_shadow(self, light: gfx.Light, kind: str) -> None:
         """Tune shadow map bias and frustum for this scene's scale.
 
-        Directional shadows use a tight positive near/far along the light
-        view axis. A wide or negative near (the old default) wastes depth
-        precision and causes peter-panning — the contact gap in the viewport.
+        Directional: tight ortho + positive near/far along the light view.
+        Point/spot: pin perspective near/far so pygfx cannot reset near≈0.
         """
         settings = self._settings
         shadow = light.shadow
@@ -818,34 +1025,66 @@ class ViewportController:
             if self._light_aim is not None:
                 light.target = self._light_aim
         elif kind == "point":
-            # Cube-map far follows light.distance in pygfx; keep a sane near.
-            far = float(getattr(light, "distance", 0.0) or 50.0) * 10.0
-            camera.depth_range = (0.1, max(far, 1.0))
+            reach = self._shadow_reach(light)
+            self._pin_perspective_shadow_depth(
+                light,
+                near=0.2,
+                far=max(reach * 1.5, 8.0),
+            )
         elif kind == "spot":
-            far = float(getattr(light, "distance", 0.0) or 25.0)
-            if far <= 0.0:
-                far = 50.0
-            camera.depth_range = (0.25, far * 2.0)
+            reach = self._shadow_reach(light)
+            self._pin_perspective_shadow_depth(
+                light,
+                near=0.25,
+                far=max(reach * 1.5, 8.0),
+            )
+            if self._light_aim is not None:
+                light.target = self._light_aim
+
+    def refresh_shadows_for_transforms(self, names: Sequence[str]) -> None:
+        """Retune shadow frustums for lights under the given transforms.
+
+        Args:
+            names: Transform UIDs that moved (e.g. after a gizmo drag).
+        """
+        for transform_name in names:
+            for light_name in self._transform_to_lights.get(transform_name, ()):
+                light = self._lights.get(light_name)
+                if light is None or not light.cast_shadow:
+                    continue
+                kind = "point"
+                if isinstance(light, gfx.DirectionalLight):
+                    kind = "directional"
+                elif isinstance(light, gfx.SpotLight):
+                    kind = "spot"
+                self._configure_light_shadow(light, kind)
+        self._canvas.request_draw()
 
     def _install_viewport_grid(self) -> None:
         """Add a Maya-style XZ ground grid that is not a scene object."""
         self._rebuild_viewport_grid()
 
     def _rebuild_viewport_grid(self) -> None:
-        """Recreate grid/axes from current settings (geometry is baked)."""
+        """Recreate the XZ ground grid from current settings.
+
+        When axes are enabled, the grid's center lines are tinted (X red,
+        Z blue). No separate AxesHelper — that looked like a giant gizmo.
+        """
         settings = self._settings
         if self._grid is not None and self._grid.parent is not None:
             self._grid.parent.remove(self._grid)
-        if self._axes is not None and self._axes.parent is not None:
-            self._axes.parent.remove(self._axes)
 
+        # Same muted tone for all lines; axis tint is applied below.
+        line = (0.32, 0.32, 0.32, 1.0)
         grid = gfx.GridHelper(
             size=settings.grid_size,
             divisions=int(settings.grid_divisions),
-            color1=(0.45, 0.45, 0.45, 1.0),
-            color2=(0.28, 0.28, 0.28, 1.0),
+            color1=line,
+            color2=line,
             thickness=1.0,
         )
+        if settings.show_axes:
+            self._tint_grid_axes(grid)
         grid.name = "viewportGrid"
         grid.cast_shadow = False
         grid.receive_shadow = False
@@ -855,14 +1094,19 @@ class ViewportController:
         self.scene.add(grid)
         self._grid = grid
 
-        axes = gfx.AxesHelper(size=settings.axes_size, thickness=2)
-        axes.name = "viewportAxes"
-        axes.cast_shadow = False
-        axes.receive_shadow = False
-        axes.local.position = (0.0, 0.001, 0.0)
-        axes.visible = settings.show_axes
-        self.scene.add(axes)
-        self._axes = axes
+    @staticmethod
+    def _tint_grid_axes(grid: gfx.GridHelper) -> None:
+        """Color the grid's X (red) and Z (blue) center lines."""
+        colors = grid.geometry.colors
+        # GridHelper packs lines as (axis, line_index, endpoint, rgba) with
+        # axis 0 = constant-x (along Z), axis 1 = constant-z (along X).
+        n_lines = int(colors.nitems // 4)
+        mid = n_lines // 2
+        shaped = np.asarray(colors.data, dtype=np.float32).reshape(2, n_lines, 2, 4)
+        shaped[0, mid, :, :] = (0.29, 0.62, 1.0, 1.0)  # Z
+        shaped[1, mid, :, :] = (0.91, 0.30, 0.24, 1.0)  # X
+        colors.data[:] = shaped.reshape((-1, 4))
+        colors.update_range(0, colors.nitems)
 
     def _resolve_transform(self, name: str) -> str | None:
         if name in self._groups:
@@ -905,12 +1149,48 @@ class ViewportController:
         # Slight inflate so the wire rim clears the shaded surface.
         outline.local.scale = (1.015, 1.015, 1.015)
         mesh.add(outline)
+
+        draw_wire = gfx.Mesh(
+            geometry,
+            gfx.MeshBasicMaterial(
+                color=_DRAW_WIRE_COLOR,
+                wireframe=True,
+                wireframe_thickness=1.0,
+            ),
+            cast_shadow=False,
+            receive_shadow=False,
+        )
+        draw_wire.visible = False
+        draw_wire.local.scale = (1.008, 1.008, 1.008)
+        mesh.add(draw_wire)
+
+        # Sibling of the mesh so bbox stays visible when the mesh is hidden.
+        bbox = gfx.Line(
+            self._aabb_line_geometry(mesh),
+            gfx.LineSegmentMaterial(
+                thickness=1.5,
+                color=_BBOX_COLOR,
+                aa=True,
+                pick_write=True,
+            ),
+        )
+        bbox.name = f"{component.name}BBox"
+        bbox.visible = False
+        bbox.cast_shadow = False
+        bbox.receive_shadow = False
+        bbox.add_event_handler(self._on_pickable_click, "click")
         group.add(mesh)
+        group.add(bbox)
 
         self._meshes[component.name] = mesh
+        self._mesh_components[component.name] = component.model_copy(deep=True)
         self._outlines[component.name] = outline
+        self._draw_wires[component.name] = draw_wire
+        self._bboxes[component.name] = bbox
         self._mesh_to_transform[component.name] = component.transform
+        self._helper_to_transform[bbox.name] = component.transform
         self._transform_to_meshes[component.transform].append(component.name)
+        self._apply_draw_mode_to_mesh(component.name)
 
     def _add_light(self, component: LightComponent) -> None:
         group = self._groups.get(component.transform)
@@ -941,8 +1221,13 @@ class ViewportController:
                 component.color,
                 intensity=component.intensity,
                 cast_shadow=component.cast_shadow,
+                distance=component.distance,
+                decay=component.decay,
             )
+            if self._light_aim is not None:
+                light.target = self._light_aim
             helper = gfx.SpotLightHelper()
+            helper.material.pick_write = True
         else:
             msg = f"unsupported light kind {component.kind!r}"
             raise ValueError(msg)
@@ -979,8 +1264,12 @@ class ViewportController:
         selected_meshes: set[str] = set()
         for transform_name in self._selected:
             selected_meshes.update(self._transform_to_meshes.get(transform_name, ()))
+        show_outline = self._draw_mode != "bounding_box"
         for name, outline in self._outlines.items():
-            outline.visible = name in selected_meshes
+            outline.visible = show_outline and name in selected_meshes
+        for name, bbox in self._bboxes.items():
+            selected = name in selected_meshes
+            bbox.material.color = _BBOX_SELECTED_COLOR if selected else _BBOX_COLOR
 
     def _end_drag(self) -> None:
         self._drag_active = False
@@ -1094,6 +1383,7 @@ class ViewportController:
         if self._on_transform_manipulated is not None:
             self._on_transform_manipulated(names, finalized)
         if finalized:
+            self.refresh_shadows_for_transforms(names)
             self._end_drag()
             self._sync_gizmo_target()
         self._canvas.request_draw()

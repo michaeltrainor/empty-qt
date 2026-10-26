@@ -43,6 +43,18 @@ class MayaTransformGizmo(gfx.TransformGizmo):
         self._on_changed = on_changed
         super().__init__(object=object, screen_size=screen_size)
         self.toggle_mode("world")
+        self._promote_overlay()
+
+    def _promote_overlay(self) -> None:
+        """Draw handles on top of scene meshes (no depth occlusion)."""
+        self.render_order = 10_000
+        for child in self.children:
+            child.render_order = 10_000
+            material = getattr(child, "material", None)
+            if material is None:
+                continue
+            material.depth_test = False
+            material.depth_write = False
 
     @property
     def tool(self) -> GizmoTool:
