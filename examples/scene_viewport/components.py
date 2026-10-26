@@ -77,6 +77,18 @@ class MeshComponent(BaseModel):
         title="Color",
         json_schema_extra={"mtqt_editor": "color"},
     )
+    roughness: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        title="Roughness",
+    )
+    metalness: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        title="Metalness",
+    )
     cast_shadow: bool = Field(default=True, title="Cast Shadow")
     receive_shadow: bool = Field(default=True, title="Receive Shadow")
 

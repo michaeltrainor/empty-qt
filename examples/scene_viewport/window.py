@@ -1066,7 +1066,13 @@ class SceneViewportWindow(QMainWindow):
                 "visible",
             }
         if isinstance(model, MeshComponent):
-            return field_name in {"color", "cast_shadow", "receive_shadow"}
+            return field_name in {
+                "color",
+                "roughness",
+                "metalness",
+                "cast_shadow",
+                "receive_shadow",
+            }
         if isinstance(model, LightComponent):
             shared = {"color", "intensity", "cast_shadow"}
             if model.kind == "point":

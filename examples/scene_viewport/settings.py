@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Space = Literal["local", "world"]
+BackgroundMode = Literal["gradient", "skybox"]
+ShadowCull = Literal["front", "back", "none"]
 
 _SETTINGS_DIR = Path.home() / ".config" / "mtqt"
 SETTINGS_PATH = _SETTINGS_DIR / "scene_viewport.json"
@@ -56,23 +58,48 @@ class AppSettings(BaseModel):
         description="On-screen manipulator size in pixels.",
     )
     ambient_intensity: float = Field(
-        default=0.35,
+        default=0.22,
         ge=0.0,
         le=5.0,
         title="Ambient Intensity",
     )
+    exposure: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=5.0,
+        title="Exposure",
+        description="Scales ambient fill and environment intensity.",
+    )
+    gamma: float = Field(
+        default=2.2,
+        ge=1.0,
+        le=2.4,
+        title="Gamma",
+        description="Display gamma applied by the renderer.",
+    )
+    background_mode: BackgroundMode = Field(
+        default="skybox",
+        title="Background Mode",
+    )
     background_top: str = Field(
-        default="#2a3038",
-        title="Background Top",
+        default="#6b7c95",
+        title="Sky / Top",
         json_schema_extra={"mtqt_editor": "color"},
     )
     background_bottom: str = Field(
-        default="#1e2228",
-        title="Background Bottom",
+        default="#2a2e36",
+        title="Ground / Bottom",
         json_schema_extra={"mtqt_editor": "color"},
     )
+    env_map_intensity: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=3.0,
+        title="Environment Intensity",
+        description="IBL strength on Standard materials.",
+    )
     shadow_bias: float = Field(
-        default=0.002,
+        default=0.0015,
         ge=0.0,
         le=0.05,
         title="Shadow Bias",
@@ -83,6 +110,17 @@ class AppSettings(BaseModel):
         le=200.0,
         title="Directional Shadow Extent",
         description="Ortho half-size of the key light shadow map.",
+    )
+    shadow_cull: ShadowCull = Field(
+        default="front",
+        title="Shadow Cull",
+        description="Front cull reduces acne; none helps open meshes.",
+    )
+    outline_thickness: float = Field(
+        default=1.75,
+        ge=0.5,
+        le=4.0,
+        title="Selection Outline",
     )
 
 
