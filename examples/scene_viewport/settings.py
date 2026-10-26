@@ -99,17 +99,18 @@ class AppSettings(BaseModel):
         description="IBL strength on Standard materials.",
     )
     shadow_bias: float = Field(
-        default=0.0015,
+        default=0.0002,
         ge=0.0,
         le=0.05,
         title="Shadow Bias",
+        description="Keep tiny. Large values detach shadows from contact.",
     )
     shadow_extent: float = Field(
-        default=24.0,
+        default=16.0,
         ge=4.0,
         le=200.0,
         title="Directional Shadow Extent",
-        description="Ortho half-size of the key light shadow map.",
+        description="Ortho size of the key light shadow map (smaller = sharper).",
     )
     shadow_cull: ShadowCull = Field(
         default="front",
@@ -135,9 +136,30 @@ def load_settings(path: Path | None = None) -> AppSettings:
         return AppSettings()
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
-        return AppSettings.model_validate(payload)
+        settings = AppSettings.model_validate(payload)
+        migrated = _migrate_shadow_defaults(settings, payload)
+        if migrated != settings:
+            # Persist the rewrite so Preferences shows the fixed defaults.
+            save_settings(migrated, target)
+        return migrated
     except (OSError, json.JSONDecodeError, ValueError):
         return AppSettings()
+
+
+def _migrate_shadow_defaults(
+    settings: AppSettings,
+    payload: dict[str, object],
+) -> AppSettings:
+    """Rewrite known-bad pre-fix shadow defaults that cause peter-panning."""
+    updates: dict[str, object] = {}
+    # Prior defaults (0.002 / 0.0015) detach contact shadows on this set scale.
+    if "shadow_bias" in payload and float(settings.shadow_bias) >= 0.001:
+        updates["shadow_bias"] = 0.0002
+    if payload.get("shadow_extent") == 24.0:
+        updates["shadow_extent"] = 16.0
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
 
 
 def save_settings(settings: AppSettings, path: Path | None = None) -> Path:
