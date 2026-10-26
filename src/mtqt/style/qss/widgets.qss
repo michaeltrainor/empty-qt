@@ -2,7 +2,7 @@
 
 LabeledLineEdit QLabel {
     min-width: 72px;
-    color: #c8c8cc;
+    color: #8b919c;
 }
 
 LabeledLineEdit QLineEdit {
@@ -10,8 +10,8 @@ LabeledLineEdit QLineEdit {
 }
 
 LabeledLineEdit[invalid="true"] QLineEdit {
-    border: 1px solid #c0392b;
-    background-color: #3a2224;
+    border: 1px solid #e85d5d;
+    background-color: #3a2226;
 }
 
 #PathPicker QLineEdit {
@@ -22,12 +22,100 @@ LabeledLineEdit[invalid="true"] QLineEdit {
     min-width: 88px;
 }
 
+#PropertiesBook {
+    background-color: #1a1d24;
+}
+
+#PropertiesBookTabs::pane {
+    border: none;
+    border-top: 1px solid #2c313c;
+    background: #1a1d24;
+}
+
+#PropertiesPanel {
+    background-color: #1a1d24;
+}
+
+#PropertiesPanelEmpty {
+    color: #8b919c;
+    padding: 16px 14px;
+    font-size: 12px;
+}
+
+#PropertiesPanelError {
+    color: #e85d5d;
+    padding: 8px 12px;
+    background-color: #3a2226;
+    border-radius: 6px;
+    margin: 6px 8px;
+}
+
+#PropertiesColorSwatch {
+    border: 1px solid #2c313c;
+    border-radius: 6px;
+    min-width: 28px;
+    min-height: 22px;
+}
+
+#PropertiesColorEditor[invalid="true"] QLineEdit,
+#PropertiesVecEditor[invalid="true"] QDoubleSpinBox,
+PropertiesPanel QLineEdit[invalid="true"],
+PropertiesPanel QSpinBox[invalid="true"],
+PropertiesPanel QDoubleSpinBox[invalid="true"] {
+    border: 1px solid #e85d5d;
+    background-color: #3a2226;
+}
+
+#PropertiesPanel QLabel {
+    color: #8b919c;
+}
+
 #NodeGraphView {
-    border: 1px solid #3f4147;
-    background-color: #1e1f22;
+    border: 1px solid #2c313c;
+    border-radius: 8px;
+    background-color: #12141a;
 }
 
 #NodeGraphDefaultContent {
     background: transparent;
-    color: #e8e8ea;
+    color: #e8eaef;
+}
+
+#SceneGraphTree {
+    background-color: #1a1d24;
+}
+
+#SceneGraphTreeView {
+    border: none;
+    border-radius: 0;
+    background-color: #12141a;
+    padding: 4px;
+}
+
+#SceneViewportToolbar {
+    spacing: 6px;
+    padding: 6px 10px;
+}
+
+#SceneViewportToolbar QToolButton {
+    padding: 6px 12px;
+    font-weight: 500;
+}
+
+#SceneViewportToolbar QToolButton:checked {
+    background-color: #4c8dff;
+    color: #ffffff;
+}
+
+#SceneViewportSplitter::handle {
+    background-color: #12141a;
+}
+
+#SceneViewportSplitter::handle:hover {
+    background-color: #4c8dff;
+}
+
+#SceneViewportCanvas {
+    background-color: #0c0e12;
+    border: none;
 }

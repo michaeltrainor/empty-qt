@@ -38,10 +38,22 @@
       }
     },
     {
+      "name": "PropertiesPanel",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/properties_panel.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "SceneViewport",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/examples/scene_viewport.py",
+      "module": "examples.scene_viewport",
       "console": "integratedTerminal",
       "justMyCode": false,
       "cwd": "${workspaceFolder}",

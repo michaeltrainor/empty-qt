@@ -53,6 +53,6 @@ world = model.index(0, 0)
 print(model.path_at(model.index(0, 0, world)))  # /world/persp
 ```
 
-Load the same shape from JSON with `SceneGraphModel.from_json(path)`. Mutations go through `append_child` / `remove_row` / `set_nodes`. `UserRole` returns the `SceneNode`. The model does not own the view.
+Load the same shape from JSON with `SceneGraphModel.from_json(path)`. Mutations go through `append_child` / `remove_row` / `set_nodes`. `index_for_name` returns the first index for a UID. `UserRole` returns the `SceneNode`. The model does not own the view.
 
 Item delegates (custom editors and painting) are the next topic after this library’s basics; v1 does not ship a custom delegate.

@@ -172,6 +172,27 @@ def test_scene_graph_tree_selection(qtbot) -> None:
     assert tree.current_name == "geo"
 
 
+def test_scene_graph_tree_multi_selection(qtbot) -> None:
+    host = QWidget()
+    qtbot.addWidget(host)
+    tree = SceneGraphTree([["world", ["geo"], ["lgt"]]], host)
+    qtbot.addWidget(tree)
+    assert tree.model.index_for_name("geo").isValid()
+    assert not tree.model.index_for_name("missing").isValid()
+
+    with qtbot.waitSignal(tree.selectedNamesChanged) as blocker:
+        tree.set_selected_names(["geo", "lgt"])
+    assert blocker.args == [["geo", "lgt"]]
+    assert tree.selected_names == ["geo", "lgt"]
+    assert tree.current_name == "lgt"
+
+    with qtbot.waitSignal(tree.selectedNamesChanged) as blocker:
+        tree.set_selected_names([])
+    assert blocker.args == [[]]
+    assert tree.selected_names == []
+    assert tree.current_name == ""
+
+
 def test_scene_graph_tree_load_json(qtbot, tmp_path) -> None:
     host = QWidget()
     qtbot.addWidget(host)

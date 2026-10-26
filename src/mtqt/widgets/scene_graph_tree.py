@@ -6,8 +6,8 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Signal
-from PySide6.QtWidgets import QTreeView, QVBoxLayout, QWidget
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, Signal
+from PySide6.QtWidgets import QAbstractItemView, QTreeView, QVBoxLayout, QWidget
 
 from mtqt.models.scene_graph_model import SceneGraphModel
 
@@ -16,7 +16,8 @@ class SceneGraphTree(QWidget):
     """A ``QTreeView`` bound to a :class:`~mtqt.models.SceneGraphModel`.
 
     Compose this widget instead of subclassing ``QTreeView``. Names are
-    UIDs; :attr:`currentNameChanged` emits the selected name as ``str``.
+    UIDs. :attr:`currentNameChanged` emits the current name;
+    :attr:`selectedNamesChanged` emits the full multi-selection as a list.
 
     Args:
         nodes: Forest of nested name lists. Ignored when ``path`` is set.
@@ -28,6 +29,7 @@ class SceneGraphTree(QWidget):
     """
 
     currentNameChanged = Signal(str)
+    selectedNamesChanged = Signal(list)
 
     def __init__(
         self,
@@ -49,15 +51,21 @@ class SceneGraphTree(QWidget):
         self._view.setObjectName("SceneGraphTreeView")
         self._view.setModel(self._model)
         self._view.setUniformRowHeights(True)
+        self._view.setHeaderHidden(True)
+        self._view.setIndentation(16)
+        self._view.setAnimated(True)
+        self._view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._view.expandAll()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self._view)
 
         selection = self._view.selectionModel()
         if selection is not None:
             selection.currentChanged.connect(self._on_current_changed)
+            selection.selectionChanged.connect(self._on_selection_changed)
 
     @property
     def model(self) -> SceneGraphModel:
@@ -71,11 +79,61 @@ class SceneGraphTree(QWidget):
 
     @property
     def current_name(self) -> str:
-        """UID of the current selection, or ``""`` when none."""
+        """UID of the current item, or ``""`` when none."""
         index = self._view.currentIndex()
         if not index.isValid():
             return ""
         return self._model.node_at(index).name
+
+    @property
+    def selected_names(self) -> list[str]:
+        """UIDs of all selected rows, in view order."""
+        selection = self._view.selectionModel()
+        if selection is None:
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for index in selection.selectedRows():
+            name = self._model.node_at(index).name
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+        return names
+
+    def set_selected_names(self, names: Sequence[str]) -> None:
+        """Replace the selection with the named nodes.
+
+        Unknown names are skipped. The last valid name becomes current.
+        An empty sequence clears the selection.
+
+        Args:
+            names: Scene node UIDs to select.
+        """
+        selection_model = self._view.selectionModel()
+        if selection_model is None:
+            return
+
+        item_selection = QItemSelection()
+        current = QModelIndex()
+        for name in names:
+            index = self._model.index_for_name(name)
+            if not index.isValid():
+                continue
+            item_selection.select(index, index)
+            current = index
+
+        selection_model.select(
+            item_selection,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect
+            | QItemSelectionModel.SelectionFlag.Rows,
+        )
+        if current.isValid():
+            selection_model.setCurrentIndex(
+                current,
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+        else:
+            self._view.setCurrentIndex(QModelIndex())
 
     def load_json(self, path: Path) -> None:
         """Replace the forest from a JSON file and expand all rows."""
@@ -87,3 +145,10 @@ class SceneGraphTree(QWidget):
             self.currentNameChanged.emit("")
             return
         self.currentNameChanged.emit(self._model.node_at(current).name)
+
+    def _on_selection_changed(
+        self,
+        _selected: QItemSelection,
+        _deselected: QItemSelection,
+    ) -> None:
+        self.selectedNamesChanged.emit(self.selected_names)

@@ -187,6 +187,29 @@ class SceneGraphModel(QAbstractItemModel):
             raise ValueError("invalid index")
         return self._node_from_index(index)
 
+    def index_for_name(self, name: str) -> QModelIndex:
+        """Return the first index whose node name equals ``name``.
+
+        Args:
+            name: Scene node UID to find.
+
+        Returns:
+            A valid ``QModelIndex``, or an invalid index when ``name`` is
+            missing.
+        """
+
+        def walk(parent: QModelIndex) -> QModelIndex:
+            for row in range(self.rowCount(parent)):
+                index = self.index(row, 0, parent)
+                if self._node_from_index(index).name == name:
+                    return index
+                found = walk(index)
+                if found.isValid():
+                    return found
+            return QModelIndex()
+
+        return walk(QModelIndex())
+
     def path_at(self, index: _ModelIndex) -> str:
         """Return a ``/``-separated path for ``index``, such as ``/world/geo``."""
         node = self.node_at(index)

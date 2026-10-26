@@ -2,6 +2,12 @@
 
 Reusable PySide6 widgets, item models, and QSS. Library code lives in `src/mtqt`.
 
+## PySide6
+
+Ownership, signal re-entrancy, deferred rebuilds, threading, and SIGSEGV
+triage: project skill `.cursor/skills/pyside6/` (read `SKILL.md` when
+writing or debugging Qt/PySide6 code).
+
 ## Docstrings
 
 Google-style docstrings on public classes, functions, and methods that are mtqt's own API. Start with a summary line, then `Args`, `Returns`, and `Raises` when they apply. Match `src/mtqt/widgets/labeled_line_edit.py`.

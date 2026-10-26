@@ -10,6 +10,8 @@ from mtqt.widgets import (
     NodeGraph,
     NodeGraphWidget,
     PathPicker,
+    PropertiesBook,
+    PropertiesPanel,
     SceneGraphTree,
 )
 
@@ -23,6 +25,8 @@ __all__ = [
     "ObjectListModel",
     "ObjectTableModel",
     "PathPicker",
+    "PropertiesBook",
+    "PropertiesPanel",
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",
