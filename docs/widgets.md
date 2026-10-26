@@ -42,11 +42,13 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from mtqt import PropertiesPanel
 
+
 class ShotProps(BaseModel):
     name: str = Field(frozen=True, title="Name")
     frame: int = Field(default=1001, ge=1001, le=1100, title="Frame")
     color: str = Field(default="#4a8fd4", json_schema_extra={"mtqt_editor": "color"})
     scene: Path = Field(default=Path("/tmp/shot.ma"), title="Scene")
+
 
 panel = PropertiesPanel(parent=window, empty_message="Nothing selected")
 panel.set_editable_check(lambda field, model: field != "name")
