@@ -15,6 +15,7 @@ from examples.scene_viewport.components import (
     MeshComponent,
     TransformComponent,
 )
+from examples.scene_viewport.env import average_horizon_color, make_studio_cubemap
 from examples.scene_viewport.gizmo import (
     GizmoSpace,
     GizmoTool,
@@ -31,10 +32,7 @@ from examples.scene_viewport.xform_math import (
     translate_mat,
 )
 
-_SELECTED_EMISSIVE = "#3d6ea8"
-_CLEAR_EMISSIVE = "#000000"
 _OUTLINE_COLOR = "#5eb0ff"
-_OUTLINE_THICKNESS = 1.25
 _ADDITIVE_MODIFIERS = frozenset({"Shift", "Control", "Meta"})
 
 Vec3 = tuple[float, float, float]
@@ -88,18 +86,18 @@ class ViewportController:
         self._ambient: gfx.AmbientLight | None = None
         self._grid: gfx.GridHelper | None = None
         self._axes: gfx.AxesHelper | None = None
+        self._env_map: gfx.Texture | None = None
 
-        self.renderer = gfx.renderers.WgpuRenderer(canvas)
-        self.scene = gfx.Scene()
-        self._background = gfx.Background.from_color(
-            self._settings.background_bottom,
-            self._settings.background_top,
+        self.renderer = gfx.renderers.WgpuRenderer(
+            canvas,
+            gamma_correction=self._settings.gamma,
         )
-        self.scene.add(self._background)
+        self.scene = gfx.Scene()
+        self._rebuild_environment()
         # Non-selectable fill; scene lights are LightComponents.
         self._ambient = gfx.AmbientLight(
             "#ffffff",
-            intensity=self._settings.ambient_intensity,
+            intensity=self._effective_ambient(),
         )
         self.scene.add(self._ambient)
         # Viewport chrome (not in the outliner / component store).
@@ -138,6 +136,7 @@ class ViewportController:
 
         self.camera = gfx.PerspectiveCamera(50, 16 / 9)
         self.camera.local.position = (5.5, 4.0, 6.5)
+        self.camera.depth_range = (0.05, 500.0)
         self.camera.show_pos((0.0, 0.4, 0.0))
         gfx.OrbitController(self.camera, register_events=self.renderer)
 
@@ -159,17 +158,15 @@ class ViewportController:
             settings: Preferences to apply (grid, ambient, shadows, gizmo).
         """
         self._settings = settings.model_copy(deep=True)
-        if self._background is not None:
-            # Two colors: bottom, then top (pygfx BackgroundMaterial).
-            self._background.material.set_colors(
-                settings.background_bottom,
-                settings.background_top,
-            )
+        self.renderer.gamma_correction = settings.gamma
+        self._rebuild_environment()
         if self._ambient is not None:
-            self._ambient.intensity = settings.ambient_intensity
+            self._ambient.intensity = self._effective_ambient()
         self._gizmo.set_screen_size(settings.gizmo_size)
         self._rebuild_viewport_grid()
-        for name, light in self._lights.items():
+        self._apply_env_to_meshes()
+        self._refresh_outline_thickness()
+        for light in self._lights.values():
             kind = "point"
             if isinstance(light, gfx.DirectionalLight):
                 kind = "directional"
@@ -178,6 +175,63 @@ class ViewportController:
             if light.cast_shadow:
                 self._configure_light_shadow(light, kind)
         self._canvas.request_draw()
+
+    def _effective_ambient(self) -> float:
+        return self._settings.ambient_intensity * self._settings.exposure
+
+    def _effective_env_intensity(self) -> float:
+        return self._settings.env_map_intensity * self._settings.exposure
+
+    def _rebuild_environment(self) -> None:
+        """Recreate background and shared IBL cubemap from settings."""
+        settings = self._settings
+        horizon = average_horizon_color(
+            settings.background_top,
+            settings.background_bottom,
+        )
+        self._env_map = make_studio_cubemap(
+            sky=settings.background_top,
+            ground=settings.background_bottom,
+            horizon=horizon,
+        )
+        if self._background is not None and self._background.parent is not None:
+            self._background.parent.remove(self._background)
+        if settings.background_mode == "skybox":
+            self._background = gfx.Background(
+                None,
+                gfx.BackgroundSkyboxMaterial(map=self._env_map),
+            )
+        else:
+            self._background = gfx.Background.from_color(
+                settings.background_bottom,
+                settings.background_top,
+            )
+        self._background.name = "viewportBackground"
+        # Keep background behind chrome / scene content.
+        self.scene.add(self._background)
+
+    def _apply_env_to_meshes(self) -> None:
+        intensity = self._effective_env_intensity()
+        for mesh in self._meshes.values():
+            material = mesh.material
+            if isinstance(material, gfx.MeshStandardMaterial):
+                material.env_map = self._env_map
+                material.env_map_intensity = intensity
+
+    def _refresh_outline_thickness(self) -> None:
+        thickness = self._settings.outline_thickness
+        for outline in self._outlines.values():
+            outline.material.wireframe_thickness = thickness
+
+    def _mesh_material(self, component: MeshComponent) -> gfx.MeshStandardMaterial:
+        return gfx.MeshStandardMaterial(
+            color=component.color,
+            roughness=component.roughness,
+            metalness=component.metalness,
+            env_map=self._env_map,
+            env_map_intensity=self._effective_env_intensity(),
+            pick_write=True,
+        )
 
     @property
     def selected_names(self) -> list[str]:
@@ -436,6 +490,7 @@ class ViewportController:
         maxs = np.max([box[1] for box in boxes], axis=0)
         center = (mins + maxs) * 0.5
         extent = np.maximum(maxs - mins, 0.25)
+        size = float(np.linalg.norm(extent))
         proxy = gfx.Mesh(
             gfx.box_geometry(
                 float(extent[0]),
@@ -446,6 +501,9 @@ class ViewportController:
         )
         proxy.local.position = (float(center[0]), float(center[1]), float(center[2]))
         self.camera.show_object(proxy, scale=1.35)
+        near = max(0.05, size * 0.02)
+        far = max(near * 200.0, size * 40.0, 50.0)
+        self.camera.depth_range = (near, min(far, 5000.0))
         self._canvas.request_draw()
 
     def apply_transform_world(
@@ -554,7 +612,13 @@ class ViewportController:
         mesh = self._meshes.get(component.name)
         if mesh is None:
             return
-        mesh.material.color = component.color
+        material = mesh.material
+        material.color = component.color
+        if isinstance(material, gfx.MeshStandardMaterial):
+            material.roughness = component.roughness
+            material.metalness = component.metalness
+            material.env_map = self._env_map
+            material.env_map_intensity = self._effective_env_intensity()
         mesh.cast_shadow = component.cast_shadow
         mesh.receive_shadow = component.receive_shadow
         self._canvas.request_draw()
@@ -722,20 +786,24 @@ class ViewportController:
         shadow = light.shadow
         # Small bias reduces acne without detaching shadows from casters.
         shadow.bias = settings.shadow_bias
-        shadow.cull_mode = "front"
+        shadow.cull_mode = settings.shadow_cull
         camera = shadow.camera
         if kind == "directional":
             # Default ortho is 1000² — far too coarse for a ~10-unit set.
             extent = settings.shadow_extent
             camera.width = extent
             camera.height = extent
-            camera.depth_range = (-20.0, 40.0)
+            # Depth range scales with the ortho footprint.
+            camera.depth_range = (-extent, extent * 2.0)
         elif kind == "point":
             # Cube-map far follows light.distance in pygfx; keep a sane near.
             far = float(getattr(light, "distance", 0.0) or 50.0) * 10.0
             camera.depth_range = (0.1, max(far, 1.0))
         elif kind == "spot":
-            camera.depth_range = (0.5, 50.0)
+            far = float(getattr(light, "distance", 0.0) or 25.0)
+            if far <= 0.0:
+                far = 50.0
+            camera.depth_range = (0.25, far * 2.0)
 
     def _install_viewport_grid(self) -> None:
         """Add a Maya-style XZ ground grid that is not a scene object."""
@@ -794,7 +862,7 @@ class ViewportController:
         geometry = geometry_for(component.kind)
         mesh = gfx.Mesh(
             geometry,
-            gfx.MeshPhongMaterial(color=component.color, pick_write=True),
+            self._mesh_material(component),
             cast_shadow=component.cast_shadow,
             receive_shadow=component.receive_shadow,
         )
@@ -806,12 +874,14 @@ class ViewportController:
             gfx.MeshBasicMaterial(
                 color=_OUTLINE_COLOR,
                 wireframe=True,
-                wireframe_thickness=_OUTLINE_THICKNESS,
+                wireframe_thickness=self._settings.outline_thickness,
             ),
             cast_shadow=False,
             receive_shadow=False,
         )
         outline.visible = False
+        # Slight inflate so the wire rim clears the shaded surface.
+        outline.local.scale = (1.015, 1.015, 1.015)
         mesh.add(outline)
         group.add(mesh)
 
@@ -886,11 +956,8 @@ class ViewportController:
         selected_meshes: set[str] = set()
         for transform_name in self._selected:
             selected_meshes.update(self._transform_to_meshes.get(transform_name, ()))
-        for name, mesh in self._meshes.items():
-            selected = name in selected_meshes
-            emissive = _SELECTED_EMISSIVE if selected else _CLEAR_EMISSIVE
-            mesh.material.emissive = emissive
-            self._outlines[name].visible = selected
+        for name, outline in self._outlines.items():
+            outline.visible = name in selected_meshes
 
     def _end_drag(self) -> None:
         self._drag_active = False

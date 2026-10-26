@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Scene viewport rendering: `MeshStandardMaterial` (roughness/metalness),
+  outline-only selection, procedural studio IBL/skybox, exposure/gamma and
+  shadow cull in Preferences, and tighter camera near/far on Frame.
 - Scene viewport: File New/Open/Save for JSON scenes; Ctrl+D duplicate;
   F2 rename; **F** frame selection; Ctrl+I isolate / Ctrl+Shift+I show all;
   per-transform `visible` flag.
