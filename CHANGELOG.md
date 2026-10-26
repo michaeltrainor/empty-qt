@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Scene viewport: File New/Open/Save for JSON scenes; Ctrl+D duplicate;
+  F2 rename; **F** frame selection; Ctrl+I isolate / Ctrl+Shift+I show all;
+  per-transform `visible` flag.
 - Refresh packaged QSS (`base`, `widgets`): denser dark chrome, underline
   tabs, pill tool buttons, styled menus/scrollbars/splitters, and cleaner
   outliner / properties chrome (`documentMode` tabs, hidden tree header).

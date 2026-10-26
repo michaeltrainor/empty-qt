@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
-from PySide6.QtWidgets import QMainWindow, QSplitter, QToolBar, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QInputDialog,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QToolBar,
+    QWidget,
+)
 from rendercanvas.qt import QRenderWidget
 
 from examples.scene_viewport.components import (
@@ -25,6 +35,7 @@ from examples.scene_viewport.scene import (
     mesh_components,
     transform_components,
 )
+from examples.scene_viewport.scene_io import SceneDocument, load_scene, save_scene
 from examples.scene_viewport.settings import AppSettings, load_settings, save_settings
 from examples.scene_viewport.settings_dialog import SettingsDialog
 from examples.scene_viewport.viewport import ViewportController, attach_viewport
@@ -74,8 +85,9 @@ class SceneViewportWindow(QMainWindow):
 
     Maya-aligned tools (toolbar + hotkeys): **Q** select, **W** move,
     **E** rotate, **R** scale; World/Local on the toolbar; **D** edit pivot.
-    **P** parent to last selected, **Shift+P** unparent. Ctrl+Z / Ctrl+Y
-    undo and redo. Create menu adds empties, meshes, and lights.
+    **P** parent to last selected, **Shift+P** unparent. Ctrl+D duplicate,
+    rename, **F** frame, Ctrl+I isolate. File menu saves/loads the scene.
+    Ctrl+Z / Ctrl+Y undo and redo.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -91,6 +103,8 @@ class SceneViewportWindow(QMainWindow):
         self._tool_actions: dict[InteractionTool, QAction] = {}
         self._space_actions: dict[Space, QAction] = {}
         self._pivot_action: QAction | None = None
+        self._scene_path: Path | None = None
+        self._visibility_backup: dict[str, bool] | None = None
 
         transforms = transform_components()
         meshes = mesh_components()
@@ -151,6 +165,27 @@ class SceneViewportWindow(QMainWindow):
         self._install_toolbar()
 
     def _install_menus(self) -> None:
+        file_menu = self.menuBar().addMenu("&File")
+        new_action = QAction("New Scene", self)
+        new_action.setShortcut(QKeySequence.StandardKey.New)
+        new_action.triggered.connect(self._new_scene)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("Open...", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._open_scene)
+        file_menu.addAction(open_action)
+
+        save_action = QAction("Save", self)
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self._save_scene)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("Save As...", self)
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.triggered.connect(self._save_scene_as)
+        file_menu.addAction(save_as_action)
+
         create_menu = self.menuBar().addMenu("&Create")
         create_menu.addAction("Empty Transform", self._create_empty)
 
@@ -175,6 +210,17 @@ class SceneViewportWindow(QMainWindow):
         edit_menu.addAction(redo_action)
         edit_menu.addSeparator()
 
+        duplicate_action = QAction("Duplicate", self)
+        duplicate_action.setShortcut(QKeySequence("Ctrl+D"))
+        duplicate_action.triggered.connect(self._duplicate_selection)
+        edit_menu.addAction(duplicate_action)
+
+        rename_action = QAction("Rename...", self)
+        rename_action.setShortcut(QKeySequence(Qt.Key.Key_F2))
+        rename_action.triggered.connect(self._rename_selection)
+        edit_menu.addAction(rename_action)
+        edit_menu.addSeparator()
+
         parent_action = QAction("Parent to Last Selected", self)
         parent_action.setShortcut(QKeySequence("P"))
         parent_action.triggered.connect(self._parent_selection)
@@ -184,6 +230,22 @@ class SceneViewportWindow(QMainWindow):
         unparent_action.setShortcut(QKeySequence("Shift+P"))
         unparent_action.triggered.connect(self._unparent_selection)
         edit_menu.addAction(unparent_action)
+        edit_menu.addSeparator()
+
+        isolate_action = QAction("Isolate Selection", self)
+        isolate_action.setShortcut(QKeySequence("Ctrl+I"))
+        isolate_action.triggered.connect(self._isolate_selection)
+        edit_menu.addAction(isolate_action)
+
+        show_all_action = QAction("Show All", self)
+        show_all_action.setShortcut(QKeySequence("Ctrl+Shift+I"))
+        show_all_action.triggered.connect(self._show_all)
+        edit_menu.addAction(show_all_action)
+
+        frame_action = QAction("Frame Selection", self)
+        frame_action.setShortcut(QKeySequence("F"))
+        frame_action.triggered.connect(self._frame_selection)
+        edit_menu.addAction(frame_action)
         edit_menu.addSeparator()
 
         delete_action = QAction("Delete", self)
@@ -615,6 +677,301 @@ class SceneViewportWindow(QMainWindow):
         self._viewport.set_parent(component.name, component.parent)
         self._viewport.apply_transform_local(component)
 
+    def _document_from_store(self) -> SceneDocument:
+        """Build a serializable document from the live component store."""
+        return SceneDocument(
+            transforms=[
+                item.model_copy(deep=True) for item in self._transforms.values()
+            ],
+            meshes=[item.model_copy(deep=True) for item in self._meshes.values()],
+            lights=[item.model_copy(deep=True) for item in self._lights.values()],
+        )
+
+    def _sorted_transforms(
+        self,
+        transforms: list[TransformComponent],
+    ) -> list[TransformComponent]:
+        """Order transforms so parents appear before children."""
+        by_name = {item.name: item for item in transforms}
+        ordered: list[TransformComponent] = []
+        seen: set[str] = set()
+
+        def visit(name: str) -> None:
+            if name in seen or name not in by_name:
+                return
+            parent = by_name[name].parent
+            if parent:
+                visit(parent)
+            seen.add(name)
+            ordered.append(by_name[name])
+
+        for item in transforms:
+            visit(item.name)
+        return ordered
+
+    def _replace_scene(self, document: SceneDocument) -> None:
+        """Replace the live scene with ``document`` and clear history."""
+        for name in list(self._transforms):
+            self._unregister_transform(name)
+        self._visibility_backup = None
+        self._history.clear()
+        for transform in self._sorted_transforms(document.transforms):
+            self._register_transform(transform)
+        for mesh in document.meshes:
+            self._register_mesh(mesh)
+        for light in document.lights:
+            self._register_light(light)
+        self._rebuild_tree([])
+
+    def _set_scene_path(self, path: Path | None) -> None:
+        self._scene_path = path
+        title = "Scene viewport"
+        if path is not None:
+            title = f"Scene viewport — {path.name}"
+        self.setWindowTitle(title)
+
+    def _new_scene(self) -> None:
+        """Reset to the default demo scene."""
+        document = SceneDocument(
+            transforms=transform_components(),
+            meshes=mesh_components(),
+            lights=light_components(),
+        )
+        self._replace_scene(document)
+        self._set_scene_path(None)
+
+    def _open_scene(self) -> None:
+        path_str, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Open Scene",
+            str(self._scene_path or Path.home()),
+            "Scene JSON (*.json)",
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        try:
+            document = load_scene(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Open Scene", f"Could not open:\n{exc}")
+            return
+        self._replace_scene(document)
+        self._set_scene_path(path)
+
+    def _save_scene(self) -> None:
+        if self._scene_path is None:
+            self._save_scene_as()
+            return
+        try:
+            save_scene(self._document_from_store(), self._scene_path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save Scene", f"Could not save:\n{exc}")
+
+    def _save_scene_as(self) -> None:
+        path_str, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Scene As",
+            str(self._scene_path or Path.home() / "scene.json"),
+            "Scene JSON (*.json)",
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.suffix.lower() != ".json":
+            path = path.with_suffix(".json")
+        try:
+            save_scene(self._document_from_store(), path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save Scene", f"Could not save:\n{exc}")
+            return
+        self._set_scene_path(path)
+
+    def _selection_roots(self) -> list[str]:
+        """Selected transforms excluding those under another selected transform."""
+        selected = [
+            name
+            for name in self._viewport.selected_names
+            if name in self._transforms and name not in FOLDER_NAMES
+        ]
+        selected_set = set(selected)
+        roots: list[str] = []
+        for name in selected:
+            parent = self._transforms[name].parent
+            under_selected = False
+            while parent:
+                if parent in selected_set:
+                    under_selected = True
+                    break
+                ancestor = self._transforms.get(parent)
+                parent = ancestor.parent if ancestor is not None else ""
+            if not under_selected:
+                roots.append(name)
+        return roots
+
+    def _duplicate_selection(self) -> None:
+        """Duplicate selected roots (with descendants) and offset them."""
+        roots = self._selection_roots()
+        if not roots:
+            return
+        to_copy = self._descendant_transforms(roots)
+        name_map: dict[str, str] = {}
+        used = self._used_names()
+        for name in to_copy:
+            stem = name
+            candidate = stem
+            index = 1
+            while candidate in used or candidate in name_map.values():
+                candidate = f"{stem}{index}"
+                index += 1
+            name_map[name] = candidate
+            used.add(candidate)
+
+        added_transforms: list[TransformComponent] = []
+        added_meshes: list[MeshComponent] = []
+        added_lights: list[LightComponent] = []
+        for name in to_copy:
+            src = self._transforms[name]
+            if src.parent in name_map:
+                new_parent = name_map[src.parent]
+            else:
+                new_parent = src.parent
+            position = src.position
+            if name in roots:
+                position = (position[0] + 1.0, position[1], position[2])
+            new_transform = src.model_copy(
+                update={
+                    "name": name_map[name],
+                    "parent": new_parent,
+                    "position": position,
+                }
+            )
+            self._register_transform(new_transform)
+            added_transforms.append(new_transform.model_copy(deep=True))
+            for mesh_name in self._meshes_by_transform.get(name, ()):
+                mesh = self._meshes[mesh_name]
+                new_mesh_name = self._unique_name(f"{name_map[name]}Shape")
+                new_mesh = mesh.model_copy(
+                    update={"name": new_mesh_name, "transform": name_map[name]}
+                )
+                self._register_mesh(new_mesh)
+                added_meshes.append(new_mesh.model_copy(deep=True))
+            for light_name in self._lights_by_transform.get(name, ()):
+                light = self._lights[light_name]
+                new_light_name = self._unique_name(f"{name_map[name]}Shape")
+                new_light = light.model_copy(
+                    update={"name": new_light_name, "transform": name_map[name]}
+                )
+                self._register_light(new_light)
+                added_lights.append(new_light.model_copy(deep=True))
+
+        self._history.push(
+            HistoryStep(
+                label="Duplicate",
+                added=SceneObjects(
+                    transforms=added_transforms,
+                    meshes=added_meshes,
+                    lights=added_lights,
+                ),
+            )
+        )
+        self._rebuild_tree([name_map[name] for name in roots])
+
+    def _rename_transform(self, old_name: str, new_name: str) -> None:
+        """Rename a transform UID and update references."""
+        stored = self._transforms.pop(old_name)
+        self._viewport.rename_transform(old_name, new_name)
+        updated = stored.model_copy(update={"name": new_name})
+        self._transforms[new_name] = updated
+        self._meshes_by_transform[new_name] = self._meshes_by_transform.pop(
+            old_name, []
+        )
+        self._lights_by_transform[new_name] = self._lights_by_transform.pop(
+            old_name, []
+        )
+        for mesh_name in self._meshes_by_transform.get(new_name, ()):
+            mesh = self._meshes[mesh_name]
+            self._meshes[mesh_name] = mesh.model_copy(update={"transform": new_name})
+            self._mesh_to_transform[mesh_name] = new_name
+        for light_name in self._lights_by_transform.get(new_name, ()):
+            light = self._lights[light_name]
+            self._lights[light_name] = light.model_copy(update={"transform": new_name})
+            self._light_to_transform[light_name] = new_name
+        for child_name, child in list(self._transforms.items()):
+            if child.parent == old_name:
+                self._transforms[child_name] = child.model_copy(
+                    update={"parent": new_name}
+                )
+
+    def _rename_selection(self) -> None:
+        names = [
+            name
+            for name in self._viewport.selected_names
+            if name in self._transforms and name not in FOLDER_NAMES
+        ]
+        if len(names) != 1:
+            return
+        old_name = names[0]
+        text, accepted = QInputDialog.getText(
+            self,
+            "Rename",
+            "Transform name:",
+            text=old_name,
+        )
+        new_name = text.strip()
+        if not accepted or not new_name or new_name == old_name:
+            return
+        if new_name in self._used_names():
+            QMessageBox.warning(
+                self,
+                "Rename",
+                f"Name {new_name!r} is already used.",
+            )
+            return
+        self._rename_transform(old_name, new_name)
+        self._history.push(HistoryStep(label="Rename", renames={old_name: new_name}))
+        self._rebuild_tree([new_name])
+
+    def _set_visibility(self, updates: dict[str, bool], *, label: str) -> None:
+        before: dict[str, TransformComponent] = {}
+        after: dict[str, TransformComponent] = {}
+        for name, visible in updates.items():
+            stored = self._transforms.get(name)
+            if stored is None or stored.visible == visible:
+                continue
+            before[name] = stored.model_copy(deep=True)
+            updated = stored.model_copy(update={"visible": visible})
+            after[name] = updated
+            self._transforms[name] = updated
+            self._viewport.set_visible(name, visible)
+        self._push_transform_edits(label, before, after)
+        selected = self._viewport.selected_names
+        if len(selected) == 1 and selected[0] in after:
+            self._props.set_pages(self._pages_for_transform(selected[0]))
+
+    def _isolate_selection(self) -> None:
+        selected = set(self._selection_roots())
+        if not selected:
+            return
+        keep = set(self._descendant_transforms(sorted(selected)))
+        if self._visibility_backup is None:
+            self._visibility_backup = {
+                name: item.visible for name, item in self._transforms.items()
+            }
+        updates = {name: name in keep for name in self._transforms}
+        self._set_visibility(updates, label="Isolate")
+
+    def _show_all(self) -> None:
+        if self._visibility_backup is not None:
+            updates = dict(self._visibility_backup)
+            self._visibility_backup = None
+        else:
+            updates = {name: True for name in self._transforms}
+        self._set_visibility(updates, label="Show All")
+
+    def _frame_selection(self) -> None:
+        names = self._viewport.selected_names
+        self._viewport.frame_selection(names or None)
+
     def _restore_objects(self, objects: SceneObjects) -> None:
         # Parents before children: transforms list is stored that way on delete.
         for transform in objects.transforms:
@@ -644,20 +1001,33 @@ class SceneViewportWindow(QMainWindow):
 
     def _apply_history_step(self, step: HistoryStep, *, undo: bool) -> None:
         if undo:
+            for old_name, new_name in step.renames.items():
+                if new_name in self._transforms:
+                    self._rename_transform(new_name, old_name)
             if step.added is not None:
                 self._remove_objects(step.added)
             if step.removed is not None:
                 self._restore_objects(step.removed)
             for component in step.transforms_before.values():
-                self._apply_stored_transform(component)
+                if component.name in self._transforms:
+                    self._apply_stored_transform(component)
         else:
             if step.removed is not None:
                 self._remove_objects(step.removed)
             if step.added is not None:
                 self._restore_objects(step.added)
+            for old_name, new_name in step.renames.items():
+                if old_name in self._transforms:
+                    self._rename_transform(old_name, new_name)
             for component in step.transforms_after.values():
-                self._apply_stored_transform(component)
+                if component.name in self._transforms:
+                    self._apply_stored_transform(component)
         select = list(step.transforms_after or step.transforms_before)
+        if step.renames:
+            if undo:
+                select = list(step.renames.keys())
+            else:
+                select = list(step.renames.values())
         if step.added is not None and not undo:
             select = [item.name for item in step.added.transforms]
         if step.removed is not None and undo:
@@ -687,7 +1057,14 @@ class SceneViewportWindow(QMainWindow):
 
     def _is_prop_editable(self, field_name: str, model: BaseModel) -> bool:
         if isinstance(model, TransformComponent):
-            return field_name in {"space", "position", "rotation", "scale", "pivot"}
+            return field_name in {
+                "space",
+                "position",
+                "rotation",
+                "scale",
+                "pivot",
+                "visible",
+            }
         if isinstance(model, MeshComponent):
             return field_name in {"color", "cast_shadow", "receive_shadow"}
         if isinstance(model, LightComponent):
@@ -754,6 +1131,10 @@ class SceneViewportWindow(QMainWindow):
                 {model.name: updated.model_copy(deep=True)},
             )
             self._props.set_pages(self._pages_for_transform(model.name))
+            return
+
+        if field_name == "visible":
+            self._set_visibility({model.name: model.visible}, label="Visibility")
             return
 
         if model.space == "local":

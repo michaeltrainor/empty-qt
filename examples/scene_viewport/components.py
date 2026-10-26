@@ -55,6 +55,11 @@ class TransformComponent(BaseModel):
         title="Pivot",
         description="Local-space manipulator offset from the transform origin.",
     )
+    visible: bool = Field(
+        default=True,
+        title="Visible",
+        description="Show this transform and its shapes in the viewport.",
+    )
 
 
 class MeshComponent(BaseModel):

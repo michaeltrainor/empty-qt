@@ -33,7 +33,7 @@ uv run python examples/labeled_line_edit.py
 
 `examples/properties_panel.py` shows `PropertiesPanel` with a small pydantic model.
 
-`examples/scene_viewport` draws with rendercanvas and pygfx. Numba builds mesh primitives. The default scene is a directional key light plus a Maya-style XZ viewport grid (chrome only). Toolbar tools: Select / Move / Rotate / Scale (Q/W/E/R) and World/Local (default **world** for new objects and editing). Use Create / Delete for empties, meshes, and lights. Selectable objects are **transforms**; shapes attach as components. `PropertiesBook` tabs show Transform / Mesh / Light. **Settings → Preferences** edits viewport chrome and lighting prefs (persisted under `~/.config/mtqt/scene_viewport.json`). That dependency group is not part of a normal sync:
+`examples/scene_viewport` draws with rendercanvas and pygfx. Numba builds mesh primitives. The default scene is a directional key light plus a Maya-style XZ viewport grid (chrome only). Toolbar tools: Select / Move / Rotate / Scale (Q/W/E/R) and World/Local (default **world** for new objects and editing). Use Create / Delete for empties, meshes, and lights. File menu saves/loads JSON scenes; Edit covers duplicate, rename, isolate, and frame. Selectable objects are **transforms**; shapes attach as components. `PropertiesBook` tabs show Transform / Mesh / Light. **Settings → Preferences** edits viewport chrome and lighting prefs (persisted under `~/.config/mtqt/scene_viewport.json`). That dependency group is not part of a normal sync:
 
 ```bash
 uv sync --extra dev --extra docs --group examples
@@ -48,9 +48,10 @@ Maya-style tools via `MayaTransformGizmo` (`examples/scene_viewport/gizmo.py`), 
 - **Space**: toolbar World / Local (default world). Session preference drives the gizmo and Transform tab; TRS stays stored local.
 - **Pivot**: each transform stores a local `pivot`; the gizmo sits on a proxy at that offset (average of selection for multi-select; orientation from the last selected). Edit Pivot moves the offset without moving geometry.
 - **Hierarchy**: Edit → Parent to Last Selected (**P**) / Unparent (**Shift+P**) keep world pose.
-- **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, and reparent.
+- **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, reparent, rename, and visibility.
+- **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; **F** frame; Ctrl+I isolate / Ctrl+Shift+I show all; `visible` on the Transform tab.
 - **Write-back**: Drag updates the local store; the properties book refreshes on pointer release.
-- **Not in scope yet**: snapping, screen space, duplicate/rename.
+- **Not in scope yet**: snapping, screen space.
 
 Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.json`, debugpy, integrated terminal):
 
