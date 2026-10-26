@@ -332,14 +332,120 @@ class ViewportController:
         self._canvas.request_draw()
 
     def apply_transform_local(self, component: TransformComponent) -> None:
-        """Push **local** TRS and pivot from ``component`` onto its group."""
+        """Push **local** TRS, pivot, and visibility from ``component``."""
         group = self._groups.get(component.name)
         if group is None:
             return
         self._apply_local(group, component)
         self._pivots[component.name] = component.pivot
+        group.visible = component.visible
         if not self._drag_active:
             self._sync_gizmo_target()
+        self._canvas.request_draw()
+
+    def set_visible(self, name: str, visible: bool) -> None:
+        """Show or hide a transform group in the viewport.
+
+        Args:
+            name: Transform UID.
+            visible: When false, the group and its shapes are hidden.
+        """
+        group = self._groups.get(name)
+        if group is None:
+            return
+        group.visible = bool(visible)
+        self._canvas.request_draw()
+
+    def rename_transform(self, old_name: str, new_name: str) -> None:
+        """Rename a transform group and remap internal indexes.
+
+        Args:
+            old_name: Existing transform UID.
+            new_name: Unique new UID.
+
+        Raises:
+            KeyError: When ``old_name`` is missing or ``new_name`` exists.
+        """
+        if old_name not in self._groups:
+            msg = f"transform not found: {old_name!r}"
+            raise KeyError(msg)
+        if new_name in self._groups:
+            msg = f"transform already exists: {new_name!r}"
+            raise KeyError(msg)
+        group = self._groups.pop(old_name)
+        group.name = new_name
+        self._groups[new_name] = group
+        self._pivots[new_name] = self._pivots.pop(old_name, (0.0, 0.0, 0.0))
+        self._transform_to_meshes[new_name] = self._transform_to_meshes.pop(
+            old_name, []
+        )
+        self._transform_to_lights[new_name] = self._transform_to_lights.pop(
+            old_name, []
+        )
+        for mesh_name, transform in list(self._mesh_to_transform.items()):
+            if transform == old_name:
+                self._mesh_to_transform[mesh_name] = new_name
+        for light_name, transform in list(self._light_to_transform.items()):
+            if transform == old_name:
+                self._light_to_transform[light_name] = new_name
+        for helper_name, transform in list(self._helper_to_transform.items()):
+            if transform == old_name:
+                self._helper_to_transform[helper_name] = new_name
+        if old_name in self._selected:
+            self._selected.discard(old_name)
+            self._selected.add(new_name)
+            self._selected_order = [
+                new_name if item == old_name else item for item in self._selected_order
+            ]
+        if not self._drag_active:
+            self._sync_gizmo_target()
+        self._canvas.request_draw()
+
+    def frame_selection(self, names: Sequence[str] | None = None) -> None:
+        """Frame the camera on ``names``, or the whole scene when empty.
+
+        Args:
+            names: Transform UIDs to frame. ``None`` uses the current
+                selection; an empty selection frames every transform.
+        """
+        targets = list(names) if names is not None else list(self._selected_order)
+        if not targets:
+            targets = list(self._groups)
+        boxes: list[np.ndarray] = []
+        for name in targets:
+            group = self._groups.get(name)
+            if group is None:
+                continue
+            box = group.get_world_bounding_box()
+            if box is not None:
+                boxes.append(np.asarray(box, dtype=np.float64))
+                continue
+            pos = as_vec3(group.world.position)
+            boxes.append(
+                np.array(
+                    [
+                        [pos[0] - 0.5, pos[1] - 0.5, pos[2] - 0.5],
+                        [pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5],
+                    ],
+                    dtype=np.float64,
+                )
+            )
+        if not boxes:
+            return
+        mins = np.min([box[0] for box in boxes], axis=0)
+        maxs = np.max([box[1] for box in boxes], axis=0)
+        center = (mins + maxs) * 0.5
+        extent = np.maximum(maxs - mins, 0.25)
+        proxy = gfx.Mesh(
+            gfx.box_geometry(
+                float(extent[0]),
+                float(extent[1]),
+                float(extent[2]),
+            ),
+            gfx.MeshBasicMaterial(opacity=0.0),
+        )
+        proxy.local.position = (float(center[0]), float(center[1]), float(center[2]))
+        self.camera.show_object(proxy, scale=1.35)
         self._canvas.request_draw()
 
     def apply_transform_world(
@@ -771,6 +877,7 @@ class ViewportController:
         group.local.scale = component.scale
         group.local.rotation = la.quat_from_euler(component.rotation, order="xyz")
         group.local.position = component.position
+        group.visible = component.visible
 
     def _draw(self) -> None:
         self.renderer.render(self.scene, self.camera)
