@@ -2,9 +2,54 @@
 
 ## Unreleased
 
-- Add `examples/scene_viewport.py`: a main window with `SceneGraphTree` on the
-  left and a rendercanvas viewport on the right. The two are not connected.
-  Install that stack with `uv sync --extra dev --extra docs --group examples`.
+- Refresh packaged QSS (`base`, `widgets`): denser dark chrome, underline
+  tabs, pill tool buttons, styled menus/scrollbars/splitters, and cleaner
+  outliner / properties chrome (`documentMode` tabs, hidden tree header).
+- Add `PropertiesPanel`: a schema-driven form from a pydantic `BaseModel`
+  instance (titles, frozen fields, `Literal` / `Enum`, vectors, `Path`,
+  color editor, `ge`/`le` bounds, in-place refresh, `validationFailed`,
+  `fieldChanged`, editability hooks, and field/global commit handlers).
+  Depends on `pydantic`. Standalone example: `examples/properties_panel.py`.
+  Same-type `set_model` refreshes in place; refreshes/rebuilds/clears
+  triggered during a field commit are deferred so spin-box clicks do not
+  segfault.
+- Add `PropertiesBook`: tabbed stack of `PropertiesPanel` pages for
+  multi-component objects (shared handlers / editability).
+- Scene viewport: hierarchical `TransformComponent` parents store local TRS;
+  mesh and light shapes parent under them. Selection always resolves to the
+  transform. `PropertiesBook` tabs show Transform / Mesh / Light. Properties
+  `space` toggles local/world editing.
+- Scene viewport: Maya-style gizmos (W/E/R tools, Q local/world) via
+  `MayaTransformGizmo` wrapping `pygfx.TransformGizmo`; drags write local
+  TRS back to the transform store.
+- Scene viewport: point lights (`fill`) with editable color, intensity,
+  distance, decay, and cast-shadow on the Light tab; pickable helpers.
+- Scene viewport: shadow maps enabled (light + mesh cast/receive flags,
+  directional shadow frustum tuned for the set).
+- Scene viewport: Create/Delete for empties, mesh primitives, and lights;
+  Maya-style XZ viewport grid (not in the outliner). Default scene is a
+  directional key light and the grid only.
+- Scene viewport: toolbar with Select/Move/Rotate/Scale (Q/W/E/R) and
+  World/Local; edit space defaults to world for new and selected objects.
+- Scene viewport: Settings → Preferences dialog edits and saves app
+  settings (edit space, grid/axes, gizmo size, ambient, background,
+  shadow bias/extent) to `~/.config/mtqt/scene_viewport.json`.
+- Scene viewport: local pivot offset (panel + **D** Edit Pivot),
+  multi-select manipulator at average pivot, Parent (**P**) / Unparent
+  (**Shift+P**) preserving world pose, and Ctrl+Z / Ctrl+Y undo-redo
+  for create/delete/TRS/pivot/reparent.
+- `SceneGraphTree` uses extended selection. Add `selectedNamesChanged`,
+  `selected_names`, and `set_selected_names`, plus
+  `SceneGraphModel.index_for_name`.
+- Scene viewport example: click meshes to select (Shift/Ctrl/Meta for
+  multi-select); tree and viewport selection stay in sync with emissive
+  highlights and a thin wireframe edge overlay.
+- Add `examples/scene_viewport` package: `SceneGraphTree` beside a pygfx
+  viewport. Numba builds box/plane/sphere meshes; mesh components and a shared
+  scene description drive both the tree and lit Phong draws (ambient +
+  directional light). Install with
+  `uv sync --extra dev --extra docs --group examples`, then
+  `uv run --group examples python -m examples.scene_viewport`.
 - Add `SceneGraphModel` / `SceneNode` for nested list-of-lists scene graphs, and
   `SceneGraphTree` composing `QTreeView`.
 - Add `mtqt.widgets.node_graph`: a Qt-free DAG (`NodeGraph`) and

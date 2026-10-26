@@ -29,9 +29,49 @@ picker.path = Path("/tmp/scene.ma")
 picker.pathChanged.connect(lambda s: print(Path(s) if s else None))
 ```
 
+## Properties panel
+
+`PropertiesPanel` builds a form from a **pydantic** `BaseModel` instance. The model type is the field profile (titles, frozen/read-only fields, `ge`/`le` bounds, `Literal` / `Enum` choices, types). The widget does not know about meshes or any host domain.
+
+Supported fields: `str`, `bool`, `int`, `float`, `Literal`, `Enum`, `pathlib.Path`, fixed-length `tuple[float, …]` (2–4), and color strings via `Field(json_schema_extra={"mtqt_editor": "color"})` (also auto-detected when the field is named `color`).
+
+Signals: `modelChanged` (updated model), `fieldChanged(field, value, model)`, `validationFailed(field, message)`. Host tools register callbacks with `register_handler` / `register_field_handler` so business logic stays outside the widget. Editability is controlled with `set_editable_check` and/or `set_field_editable` (overrides schema `frozen` / `mtqt_read_only`). Calling `set_model` again with the same model type refreshes values in place. Refreshes, rebuilds, and clears that run from inside a field commit are deferred to the next event-loop tick so spin boxes are not touched mid-click.
+
+```python
+from pathlib import Path
+from pydantic import BaseModel, Field
+from mtqt import PropertiesPanel
+
+class ShotProps(BaseModel):
+    name: str = Field(frozen=True, title="Name")
+    frame: int = Field(default=1001, ge=1001, le=1100, title="Frame")
+    color: str = Field(default="#4a8fd4", json_schema_extra={"mtqt_editor": "color"})
+    scene: Path = Field(default=Path("/tmp/shot.ma"), title="Scene")
+
+panel = PropertiesPanel(parent=window, empty_message="Nothing selected")
+panel.set_editable_check(lambda field, model: field != "name")
+panel.set_field_editable("scene", False)
+panel.register_field_handler("frame", lambda field, value, model: print(field, value))
+panel.register_handler(lambda field, value, model: apply_shot(model))
+panel.set_model(ShotProps(name="sh010"))
+panel.validationFailed.connect(lambda field, msg: print(field, msg))
+```
+
+## Properties book
+
+`PropertiesBook` is a tabbed stack of `PropertiesPanel` pages for one object with several components (Transform / Mesh / Light). Shared handlers and editability hooks apply to every page. `set_pages([("Transform", t), ("Mesh", m)])` shows tabs; a single page hides the tab bar. `set_model` / `clear` still work for the one-page case.
+
+```python
+from mtqt import PropertiesBook
+
+book = PropertiesBook(parent=window, empty_message="Nothing selected")
+book.register_handler(lambda field, value, model: apply_component(model))
+book.set_pages([("Transform", transform), ("Mesh", mesh)])
+```
+
 ## Scene graph tree
 
-`SceneGraphTree` **contains** a `QTreeView` bound to `SceneGraphModel`. Pass a nested list-of-lists forest or a JSON `path`. `currentNameChanged` emits the selected UID as `str`.
+`SceneGraphTree` **contains** a `QTreeView` bound to `SceneGraphModel`. Pass a nested list-of-lists forest or a JSON `path`. The view uses extended selection. `currentNameChanged` emits the current UID as `str`. `selectedNamesChanged` emits all selected UIDs as `list[str]`. Use `selected_names` / `set_selected_names` to read or replace the multi-selection. `SceneGraphModel.index_for_name` looks up a UID.
 
 ```python
 from pathlib import Path
@@ -39,6 +79,8 @@ from mtqt import SceneGraphTree
 
 tree = SceneGraphTree(parent=window, path=Path("scene_graph.json"))
 tree.currentNameChanged.connect(print)
+tree.selectedNamesChanged.connect(print)
+tree.set_selected_names(["geo", "lgt"])
 ```
 
 ## Node graph
