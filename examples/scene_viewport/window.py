@@ -52,6 +52,8 @@ _MESH_DEFAULTS: dict[PrimitiveKind, dict[str, object]] = {
         "color": "#5a6358",
         "position": (0.0, 0.0, 0.0),
         "scale": (4.0, 1.0, 4.0),
+        # Ground planes should receive, not cast — casting causes contact artifacts.
+        "cast_shadow": False,
     },
     "sphere": {"color": "#4a8fd4", "position": (0.0, 0.5, 0.0)},
 }
@@ -485,6 +487,8 @@ class SceneViewportWindow(QMainWindow):
             transform=name,
             kind=kind,
             color=str(defaults["color"]),
+            cast_shadow=bool(defaults.get("cast_shadow", True)),
+            receive_shadow=bool(defaults.get("receive_shadow", True)),
         )
         self._register_transform(transform)
         self._register_mesh(mesh)

@@ -87,6 +87,7 @@ class ViewportController:
         self._grid: gfx.GridHelper | None = None
         self._axes: gfx.AxesHelper | None = None
         self._env_map: gfx.Texture | None = None
+        self._light_aim: gfx.WorldObject | None = None
 
         self.renderer = gfx.renderers.WgpuRenderer(
             canvas,
@@ -100,6 +101,11 @@ class ViewportController:
             intensity=self._effective_ambient(),
         )
         self.scene.add(self._ambient)
+        # Shared aim point for directional lights (shadow camera look-at).
+        self._light_aim = gfx.WorldObject()
+        self._light_aim.name = "lightAim"
+        self._light_aim.local.position = (0.0, 0.0, 0.0)
+        self.scene.add(self._light_aim)
         # Viewport chrome (not in the outliner / component store).
         self._install_viewport_grid()
 
@@ -781,10 +787,15 @@ class ViewportController:
         return False
 
     def _configure_light_shadow(self, light: gfx.Light, kind: str) -> None:
-        """Tune shadow map bias and frustum for this scene's scale."""
+        """Tune shadow map bias and frustum for this scene's scale.
+
+        Directional shadows use a tight positive near/far along the light
+        view axis. A wide or negative near (the old default) wastes depth
+        precision and causes peter-panning — the contact gap in the viewport.
+        """
         settings = self._settings
         shadow = light.shadow
-        # Small bias reduces acne without detaching shadows from casters.
+        # Tiny bias; large values detach shadows from casters (peter-panning).
         shadow.bias = settings.shadow_bias
         shadow.cull_mode = settings.shadow_cull
         camera = shadow.camera
@@ -793,8 +804,19 @@ class ViewportController:
             extent = settings.shadow_extent
             camera.width = extent
             camera.height = extent
-            # Depth range scales with the ortho footprint.
-            camera.depth_range = (-extent, extent * 2.0)
+            aim = (
+                np.asarray(self._light_aim.world.position, dtype=np.float64)
+                if self._light_aim is not None
+                else np.zeros(3, dtype=np.float64)
+            )
+            light_pos = np.asarray(light.world.position, dtype=np.float64)
+            distance = float(np.linalg.norm(light_pos - aim))
+            # Scene sits in front of the shadow camera; keep near > 0.
+            near = max(0.25, distance - extent * 0.75)
+            far = max(near + 1.0, distance + extent)
+            camera.depth_range = (near, far)
+            if self._light_aim is not None:
+                light.target = self._light_aim
         elif kind == "point":
             # Cube-map far follows light.distance in pygfx; keep a sane near.
             far = float(getattr(light, "distance", 0.0) or 50.0) * 10.0
@@ -897,12 +919,13 @@ class ViewportController:
             raise KeyError(msg)
 
         if component.kind == "directional":
-            light: gfx.Light = gfx.DirectionalLight(
+            light = gfx.DirectionalLight(
                 component.color,
                 intensity=component.intensity,
                 cast_shadow=component.cast_shadow,
+                target=self._light_aim,
             )
-            helper: gfx.WorldObject = gfx.DirectionalLightHelper(ray_length=1.5)
+            helper = gfx.DirectionalLightHelper(ray_length=1.5)
         elif component.kind == "point":
             light = gfx.PointLight(
                 component.color,

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix directional shadows: positive near/far frustum, lower bias, shared
+  light aim target, and ground planes default to cast-shadow off (stops
+  peter-panning / detached contact shadows).
 - Scene viewport rendering: `MeshStandardMaterial` (roughness/metalness),
   outline-only selection, procedural studio IBL/skybox, exposure/gamma and
   shadow cull in Preferences, and tighter camera near/far on Frame.
