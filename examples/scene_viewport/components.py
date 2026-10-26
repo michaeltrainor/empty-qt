@@ -6,10 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from examples.scene_viewport.mesh.types import PrimitiveKind
-
 Space = Literal["local", "world"]
 LightKind = Literal["directional", "point", "spot"]
+PrimitiveKind = Literal["box", "plane", "sphere"]
 
 
 class TransformComponent(BaseModel):
