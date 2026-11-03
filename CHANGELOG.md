@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Claude Code config:
+  - A PreToolUse hook blocks `gh pr merge` everywhere except the
+    `pr-reviewer` agent.
+  - A SessionStart hook keeps the environment synced with `uv.lock`.
+  - `pr-reviewer` runs in its own worktree and can't edit files, and the
+    instructions that used to be repeated in every handoff are now in the
+    agent file.
+  - `/ship` takes a change from `scripts/check` to a reviewed PR.
+  - Path-scoped rules cover the library and the scene viewport.
+- The `platforms` CI job no longer installs the docs group.
 - Move the `dev` and `docs` extras to PEP 735 dependency groups, so they
   no longer appear in mtqt's published metadata. They are default groups,
   so `uv sync --all-packages` installs everything.

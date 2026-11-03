@@ -15,7 +15,8 @@
       "Bash(uv run pytest *)",
       "Bash(uv run ruff *)",
       "Bash(uv run pyright *)",
-      "Bash(uv run mkdocs build *)"
+      "Bash(uv run mkdocs build *)",
+      "Bash(scripts/check)"
     ],
     "deny": [
       "Bash(git push --force*)",
@@ -29,6 +30,29 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && uv sync --all-packages --locked --quiet >/dev/null 2>&1 || echo 'SessionStart: `uv sync --all-packages --locked` failed. uv.lock may be stale against pyproject.toml: run `uv lock`, then `uv sync --all-packages`.'",
+            "timeout": 180
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-merge.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
