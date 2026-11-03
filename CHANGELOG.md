@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Move the `dev` and `docs` extras to PEP 735 dependency groups, so they
+  no longer appear in mtqt's published metadata. They are default groups,
+  so `uv sync --all-packages` installs everything.
+- CI syncs with `--locked`, which fails on a stale `uv.lock`. `--frozen`
+  ignored the mismatch.
+- Add `scripts/check`, the one list of checks that CI, agents, and
+  contributors run. Pre-commit runs ruff and pyright from `uv.lock`, so
+  Dependabot updates reach it.
+- The docs gate no longer requires a docs change for `.github/` edits.
 - Fix the scene viewport's 63 pyright errors, and type-check
   `apps/scene_viewport/src` in CI. Shadow depth pins move from private
   attributes on pygfx shadows into the viewport, with regression tests. Calls

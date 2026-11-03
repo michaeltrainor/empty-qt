@@ -17,7 +17,7 @@ pip install "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
 From a clone:
 
 ```bash
-uv sync --extra dev --extra docs
+uv sync --all-packages
 ```
 
 ## Try it

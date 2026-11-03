@@ -23,7 +23,7 @@ pip install "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
 From a source checkout:
 
 ```bash
-uv sync --extra dev --extra docs
+uv sync --all-packages
 ```
 
 ## Gallery

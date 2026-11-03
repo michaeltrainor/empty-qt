@@ -1,7 +1,8 @@
 # Development
 
 ```bash
-uv sync --all-packages --extra dev --extra docs
+uv sync --all-packages
+scripts/check
 uv run ruff format
 uv run ruff check
 uv run pyright
@@ -17,7 +18,9 @@ Install git hooks (after extras are synced):
 uv run pre-commit install
 ```
 
-`pip` users can `pip install -e ".[dev,docs]"`.
+`dev` and `docs` are dependency groups ([PEP 735](https://peps.python.org/pep-0735/)), not extras, so they never appear in the published package. uv installs both by default. With pip 25.1 or later, use `pip install -e . --group dev --group docs`.
+
+`scripts/check` runs ruff, the format check, pyright, pytest with the 80% coverage floor, and `mkdocs build --strict`, the same list as the CI `check` job.
 
 ## Layout
 
@@ -36,7 +39,7 @@ uv run python examples/labeled_line_edit.py
 `apps/scene_viewport` is a separate, unpublished app in the uv workspace. It draws with rendercanvas and pygfx. Numba builds mesh primitives. The default scene is a directional key light plus a Maya-style XZ viewport grid (chrome only). Toolbar tools: Select / Move / Rotate / Scale (Q/W/E/R) and World/Local (default **world** for new objects and editing). Use Create / Delete for empties, meshes, and lights. File menu saves/loads JSON scenes; Edit covers duplicate, rename, isolate, and frame. Selectable objects are **transforms**; shapes attach as components. `PropertiesBook` tabs show Transform / Mesh / Light. **Settings → Preferences** edits viewport chrome and lighting prefs (persisted under `~/.config/mtqt/scene_viewport.json`). A plain `uv sync` installs only mtqt, so add the app with `--all-packages`:
 
 ```bash
-uv sync --all-packages --extra dev --extra docs
+uv sync --all-packages
 uv run --package scene-viewport scene-viewport
 ```
 
@@ -95,8 +98,8 @@ Before a pull request is marked ready for review:
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 
-CI (`.github/workflows/ci.yml`) syncs with `--all-packages`, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without `--all-packages`, the scene viewport tests skip locally. Pyright checks both `src` and `apps/scene_viewport/src`. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
+CI (`.github/workflows/ci.yml`) runs `uv sync --all-packages --locked`, then `scripts/check`. `--locked` fails when `uv.lock` is out of date with `pyproject.toml`, so run `uv lock` after changing dependencies. Without `--all-packages`, the scene viewport tests skip locally. Pyright checks both `src` and `apps/scene_viewport/src`. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
 
 `.github/workflows/qt-latest.yml` tests the newest PySide6 weekly as an early warning, and never blocks a PR. Dependabot opens weekly update PRs, and leaves Python and PySide6 alone because they follow the VFX Reference Platform.
 
-Tests fail on Qt warnings (`qt_log_level_fail`). Add a pattern to `qt_log_ignore` in `pyproject.toml` only for noise from the test platform. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `apps/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.
+Tests fail on Qt warnings (`qt_log_level_fail`). Add a pattern to `qt_log_ignore` in `pyproject.toml` only for noise from the test platform. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `apps/`, or `pyproject.toml` without updating `docs/`. Dependabot PRs are exempt. That workflow does not merge.
