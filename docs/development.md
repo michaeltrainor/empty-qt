@@ -91,7 +91,7 @@ Before a pull request is marked ready for review:
 - pytest-qt tests under `tests/` for every public widget, using the `qtbot` fixture. Run `uv run pytest`.
 - `uv run ruff check` and `uv run ruff format` are clean.
 - MkDocs pages under `docs/` are updated for anything a user or contributor would notice (new widgets, examples, commands, or the PR process). `mkdocs.yml` uses `docstring_style: google`. Verify with `uv run mkdocs build --strict` after `uv sync --extra dev --extra docs`.
-- `CHANGELOG.md` is updated under `## Unreleased` in the same PR, before merge. Do not add a follow-up commit after merge.
+- `CHANGELOG.md` is updated under `## Unreleased` in the same PR, before merge. Do not add a follow-up commit after merge. Dependabot PRs need no changelog or docs update, and the `gate` job skips them.
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 

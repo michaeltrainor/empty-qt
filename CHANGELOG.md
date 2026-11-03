@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The `gate` job skips Dependabot PRs, which need no changelog or docs update.
+- Widen the Claude Code force-push deny rules to cover flags after the
+  remote, `+refspec` pushes, and `--mirror`.
 - Move the scene viewport from `examples/` to `apps/scene_viewport`, an
   unpublished uv workspace member with its own tests. Install it with
   `uv sync --all-packages`, and run it with

@@ -25,10 +25,16 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_DRAFT: ${{ github.event.pull_request.draft }}
           BASE_REF: ${{ github.base_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$PR_DRAFT" = "true" ]; then
             echo "Docs and changelog are enforced when the PR is ready."
+            exit 0
+          fi
+          # Dependency bumps are not user-facing, so they need no changelog or docs.
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            echo "Dependabot PR: changelog and docs are not required."
             exit 0
           fi
 

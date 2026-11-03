@@ -46,7 +46,7 @@ uv run mkdocs build --strict
 
 ## Changelog
 
-Every PR that is merged updates `CHANGELOG.md` under `## Unreleased` in the same PR, before merge. Do not add a follow-up commit after merge.
+Every PR that is merged updates `CHANGELOG.md` under `## Unreleased` in the same PR, before merge. Dependabot PRs are the exception: dependency bumps need no changelog or docs update. Do not add a follow-up commit after merge.
 
 ## Review and merge
 
