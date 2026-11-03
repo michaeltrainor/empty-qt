@@ -1,7 +1,7 @@
 # Development
 
 ```bash
-uv sync --extra dev --extra docs
+uv sync --all-packages --extra dev --extra docs
 uv run ruff format
 uv run ruff check
 uv run pyright
@@ -33,16 +33,16 @@ uv run python examples/labeled_line_edit.py
 
 `examples/properties_panel.py` shows `PropertiesPanel` with a small pydantic model.
 
-`examples/scene_viewport` draws with rendercanvas and pygfx. Numba builds mesh primitives. The default scene is a directional key light plus a Maya-style XZ viewport grid (chrome only). Toolbar tools: Select / Move / Rotate / Scale (Q/W/E/R) and World/Local (default **world** for new objects and editing). Use Create / Delete for empties, meshes, and lights. File menu saves/loads JSON scenes; Edit covers duplicate, rename, isolate, and frame. Selectable objects are **transforms**; shapes attach as components. `PropertiesBook` tabs show Transform / Mesh / Light. **Settings → Preferences** edits viewport chrome and lighting prefs (persisted under `~/.config/mtqt/scene_viewport.json`). That dependency group is not part of a normal sync:
+`apps/scene_viewport` is a separate, unpublished app in the uv workspace. It draws with rendercanvas and pygfx. Numba builds mesh primitives. The default scene is a directional key light plus a Maya-style XZ viewport grid (chrome only). Toolbar tools: Select / Move / Rotate / Scale (Q/W/E/R) and World/Local (default **world** for new objects and editing). Use Create / Delete for empties, meshes, and lights. File menu saves/loads JSON scenes; Edit covers duplicate, rename, isolate, and frame. Selectable objects are **transforms**; shapes attach as components. `PropertiesBook` tabs show Transform / Mesh / Light. **Settings → Preferences** edits viewport chrome and lighting prefs (persisted under `~/.config/mtqt/scene_viewport.json`). A plain `uv sync` installs only mtqt, so add the app with `--all-packages`:
 
 ```bash
-uv sync --extra dev --extra docs --group examples
-uv run --group examples python -m examples.scene_viewport
+uv sync --all-packages --extra dev --extra docs
+uv run --package scene-viewport scene-viewport
 ```
 
 ### Scene viewport gizmos
 
-Maya-style tools via `MayaTransformGizmo` (`examples/scene_viewport/gizmo.py`), wrapping `pygfx.TransformGizmo`:
+Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewport/gizmo.py`), wrapping `pygfx.TransformGizmo`:
 
 - **Tools** (toolbar + hotkeys): **Q** select, **W** move, **E** rotate, **R** scale; **D** edit pivot (affect pivot only).
 - **Shading** (**1**–**6**): bounding box, wireframe on shaded, flat, wireframe, shaded, textured (optional `albedo_map` on Mesh).
@@ -63,7 +63,7 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - PathPicker — `examples/path_picker.py`
 - PropertiesPanel — `examples/properties_panel.py`
 - SceneGraphTree — `examples/scene_graph_tree.py`
-- SceneViewport — `examples.scene_viewport` (module)
+- SceneViewport — `scene_viewport` (module)
 - NodeGraph — `examples/node_graph.py`
 - DropWidget — `examples/drop_widget.py`
 - DropWidget module — `src/mtqt/widgets/drag_n_drop.py`
@@ -95,8 +95,8 @@ Before a pull request is marked ready for review:
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 
-CI (`.github/workflows/ci.yml`) syncs the `examples` dependency group, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without that group, the scene viewport tests that need pygfx skip locally. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
+CI (`.github/workflows/ci.yml`) syncs with `--all-packages`, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without `--all-packages`, the scene viewport tests skip locally. Pyright covers `src` only, because the app has known type errors. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
 
 `.github/workflows/qt-latest.yml` tests the newest PySide6 weekly as an early warning, and never blocks a PR. Dependabot opens weekly update PRs, and leaves Python and PySide6 alone because they follow the VFX Reference Platform.
 
-Tests fail on Qt warnings (`qt_log_level_fail`). Add a pattern to `qt_log_ignore` in `pyproject.toml` only for noise from the test platform. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.
+Tests fail on Qt warnings (`qt_log_level_fail`). Add a pattern to `qt_log_ignore` in `pyproject.toml` only for noise from the test platform. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `apps/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.

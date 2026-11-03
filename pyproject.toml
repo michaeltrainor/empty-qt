@@ -23,13 +23,8 @@ classifiers = [
 ]
 keywords = ["pyside6", "qt", "widgets", "models", "vfx"]
 
-[dependency-groups]
-examples = [
-    "wgpu",
-    "rendercanvas",
-    "pygfx",
-    "numba",
-]
+[tool.uv.workspace]
+members = ["apps/scene_viewport"]
 
 [project.urls]
 Homepage = "https://github.com/michaeltrainor/empty-qt"
@@ -52,7 +47,7 @@ build-backend = "uv_build"
 
 [tool.ruff]
 target-version = "py313"
-src = ["src", "tests", "examples"]
+src = ["src", "tests", "examples", "apps/scene_viewport/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "D", "B", "C4", "SIM", "RUF", "PT", "T20"]
@@ -61,6 +56,7 @@ ignore = ["D102", "D104", "D105", "D107", "D203", "D213", "D401", "D413"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
 "examples/**" = ["D", "T20"]
+"apps/**" = ["D", "T20"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Qt item-model signatures default parent to an invalid index.
@@ -71,9 +67,8 @@ convention = "google"
 
 [tool.pytest.ini_options]
 qt_api = "pyside6"
-testpaths = ["tests"]
-pythonpath = ["."]
-addopts = "--cov=mtqt --cov-report=term-missing"
+testpaths = ["tests", "apps/scene_viewport/tests"]
+addopts = "--import-mode=importlib --cov=mtqt --cov-report=term-missing"
 qt_log_level_fail = "WARNING"
 # Offscreen platform noise: fonts not installed here, and a missing plugin call.
 qt_log_ignore = [

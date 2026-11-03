@@ -8,11 +8,11 @@ import pytest
 
 pytest.importorskip("pydantic")
 
-from examples.scene_viewport.components import (
+from scene_viewport.components import (
     MeshComponent,
     TransformComponent,
 )
-from examples.scene_viewport.scene_io import SceneDocument, load_scene, save_scene
+from scene_viewport.scene_io import SceneDocument, load_scene, save_scene
 
 
 def test_scene_roundtrip(tmp_path: Path) -> None:

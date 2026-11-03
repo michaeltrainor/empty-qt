@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from examples.scene_viewport.components import TransformComponent
-from examples.scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
+
+from scene_viewport.components import TransformComponent
+from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
 
 
 def test_history_undo_redo() -> None:
@@ -47,7 +48,7 @@ def test_trs_roundtrip() -> None:
     """Compose then decompose recovers position and scale."""
     np = pytest.importorskip("numpy")
     pytest.importorskip("pylinalg")
-    from examples.scene_viewport.xform_math import mat_from_trs, trs_from_mat
+    from scene_viewport.xform_math import mat_from_trs, trs_from_mat
 
     matrix = mat_from_trs((1.0, 2.0, 3.0), (0.1, -0.2, 0.3), (2.0, 2.0, 2.0))
     position, _rotation, scale = trs_from_mat(matrix)
@@ -59,7 +60,7 @@ def test_pivot_proxy_roundtrip() -> None:
     """Proxy at pivot maps back to the original transform matrix."""
     np = pytest.importorskip("numpy")
     pytest.importorskip("pylinalg")
-    from examples.scene_viewport.xform_math import (
+    from scene_viewport.xform_math import (
         mat_from_trs,
         pivot_world_matrix,
         transform_world_from_proxy,
@@ -76,7 +77,7 @@ def test_local_pivot_from_world_point() -> None:
     """World point under a translated transform is the local pivot."""
     pytest.importorskip("numpy")
     pytest.importorskip("pylinalg")
-    from examples.scene_viewport.xform_math import (
+    from scene_viewport.xform_math import (
         local_pivot_from_world_point,
         mat_from_trs,
     )

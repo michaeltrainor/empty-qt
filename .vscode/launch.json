@@ -53,7 +53,7 @@
       "name": "SceneViewport",
       "type": "debugpy",
       "request": "launch",
-      "module": "examples.scene_viewport",
+      "module": "scene_viewport",
       "console": "integratedTerminal",
       "justMyCode": false,
       "cwd": "${workspaceFolder}",

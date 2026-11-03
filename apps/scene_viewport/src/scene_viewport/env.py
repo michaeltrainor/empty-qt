@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pygfx as gfx
 
-from examples.scene_viewport.xform_math import as_vec3
+from scene_viewport.xform_math import as_vec3
 
 
 def _parse_color(color: str) -> tuple[float, float, float]:

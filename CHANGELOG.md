@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Move the scene viewport from `examples/` to `apps/scene_viewport`, an
+  unpublished uv workspace member with its own tests. Install it with
+  `uv sync --all-packages`, and run it with
+  `uv run --package scene-viewport scene-viewport`. This replaces the
+  `examples` dependency group.
+
 ## 0.2.0 — 2026-11-02
 
 - CI runs pyright, enforces 80% coverage, and tests on macOS and Windows.

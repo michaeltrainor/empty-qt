@@ -11,22 +11,22 @@ import pylinalg as la
 from PySide6.QtWidgets import QWidget  # noqa: F401  # select Qt before rendercanvas
 from rendercanvas.qt import QRenderWidget
 
-from examples.scene_viewport.components import (
+from scene_viewport.components import (
     LightComponent,
     MeshComponent,
     TransformComponent,
 )
-from examples.scene_viewport.env import average_horizon_color, make_studio_cubemap
-from examples.scene_viewport.gizmo import (
+from scene_viewport.env import average_horizon_color, make_studio_cubemap
+from scene_viewport.gizmo import (
     GizmoSpace,
     GizmoTool,
     InteractionTool,
     MayaTransformGizmo,
 )
-from examples.scene_viewport.mesh.geometry import geometry_for
-from examples.scene_viewport.settings import AppSettings
-from examples.scene_viewport.textures import load_albedo_texture
-from examples.scene_viewport.xform_math import (
+from scene_viewport.mesh.geometry import geometry_for
+from scene_viewport.settings import AppSettings
+from scene_viewport.textures import load_albedo_texture
+from scene_viewport.xform_math import (
     as_vec3,
     average_positions,
     local_pivot_from_world_point,

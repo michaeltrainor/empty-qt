@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from examples.scene_viewport.settings import AppSettings
 from mtqt.widgets.properties_panel import PropertiesPanel
+from scene_viewport.settings import AppSettings
 
 
 class SettingsDialog(QDialog):
