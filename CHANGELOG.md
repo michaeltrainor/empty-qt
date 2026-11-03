@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `DropWidget` emits a new `filesDropped` signal with the local paths from a
+  drop, and no longer prints to stdout. It refuses drags with no local files.
+- `import mtqt` no longer fails when package metadata is missing, as when it
+  is vendored or on `PYTHONPATH`. `__version__` is then `0+unknown`.
+- Remove the unused `pyside6-qtads` dependency.
+- Point project URLs at the GitHub repository, document installing from it
+  (mtqt is not on PyPI), and drop the Windows-only VS Code interpreter path.
 - Move project agent tooling to Claude Code: the `pr-reviewer` agent and the
   PySide6 skill now live under `.claude/`, with shared permissions and a
   `ruff format` hook in `.claude/settings.json`. Remove the Grok agent config.

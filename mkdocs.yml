@@ -1,6 +1,6 @@
 site_name: mtqt
 site_description: Reusable PySide6 widgets, models, and QSS
-repo_url: https://cursor.com/codebase/mtd3v/mtqt
+repo_url: https://github.com/michaeltrainor/empty-qt
 
 theme:
   name: material

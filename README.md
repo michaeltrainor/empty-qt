@@ -6,10 +6,12 @@ This package is MIT licensed. PySide6 6.8 is LGPL for typical PyPI wheels; your 
 
 ## Install
 
+mtqt is not on PyPI yet. Install it from the repository, which needs read access:
+
 ```bash
-uv add mtqt
+uv add "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
 # or
-pip install mtqt
+pip install "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
 ```
 
 From a clone:
