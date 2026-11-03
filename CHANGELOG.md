@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-11-02
+
 - CI runs pyright, enforces 80% coverage, and tests on macOS and Windows.
   A weekly workflow tests the newest PySide6 without blocking PRs. Dependabot
   opens weekly updates, leaving Python and PySide6 pinned.
