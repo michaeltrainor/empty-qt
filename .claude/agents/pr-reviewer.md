@@ -32,7 +32,7 @@ Read the changed files. Check them against `AGENTS.md`:
 
 - New public classes, functions, and methods that are mtqt's own API have Google-style docstrings (summary line, then Args / Returns / Raises when they apply), matching `src/mtqt/widgets/labeled_line_edit.py`. Qt virtual overrides (`paintEvent`, `rowCount`, `data`, and similar) need no docstring when they only implement the Qt contract. `__init__` is documented on the class. Ruff ignores `D102` because Qt overrides are public methods; still flag a new public Python method that has no docstring.
 - Widget changes have pytest-qt tests under `tests/` that use the `qtbot` fixture. Tests must not construct `QApplication`.
-- Ruff is clean for select `E`, `F`, `I`, `UP`, and `D` (pydocstyle convention `google`).
+- Ruff and pyright are clean. CI runs both, and the ruff rules are in `pyproject.toml` (pydocstyle convention `google`).
 - `docs/` is updated when the diff touches `src/`, `examples/`, `.github/`, or `pyproject.toml`, for anything a user or contributor would notice.
 - `CHANGELOG.md` is updated under `## Unreleased`.
 

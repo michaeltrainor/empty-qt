@@ -455,7 +455,7 @@ class NodeGraph:
         """
         if not self._nodes:
             return
-        rank = {node_id: 0 for node_id in self._nodes}
+        rank = dict.fromkeys(self._nodes, 0)
         for node_id in self.topological_order():
             for successor in self.successors(node_id):
                 rank[successor] = max(rank[successor], rank[node_id] + 1)

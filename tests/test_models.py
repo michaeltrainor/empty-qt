@@ -49,6 +49,29 @@ FOREST = [
 ]
 
 
+@pytest.mark.parametrize(
+    "items",
+    [[], [Item("a", 1), Item("b", 2)]],
+    ids=["empty", "populated"],
+)
+def test_list_model_contract(qtmodeltester, items: list[Item]) -> None:
+    qtmodeltester.check(ObjectListModel(items, display_attr="name"))
+
+
+@pytest.mark.parametrize(
+    "items",
+    [[], [Item("a", 1), Item("b", 2)]],
+    ids=["empty", "populated"],
+)
+def test_table_model_contract(qtmodeltester, items: list[Item]) -> None:
+    qtmodeltester.check(ObjectTableModel(items, columns=("name", "count")))
+
+
+@pytest.mark.parametrize("forest", [[], FOREST], ids=["empty", "populated"])
+def test_scene_graph_model_contract(qtmodeltester, forest: list) -> None:
+    qtmodeltester.check(SceneGraphModel(forest))
+
+
 def test_scene_graph_parent_child_and_user_role() -> None:
     model = SceneGraphModel(FOREST)
     assert model.columnCount() == 1

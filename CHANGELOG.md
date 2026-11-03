@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- CI runs pyright, enforces 80% coverage, and tests on macOS and Windows.
+  A weekly workflow tests the newest PySide6 without blocking PRs. Dependabot
+  opens weekly updates, leaving Python and PySide6 pinned.
+- Adopt ruff rules `B`, `C4`, `SIM`, `RUF`, `PT`, and `T20`, and fix the
+  findings along with the pyright errors in `PropertiesPanel`.
+- Add `QAbstractItemModelTester` coverage for all three item models. Tests now
+  fail on Qt warnings.
+- Update ruff to 0.17.3, `uv_build` to 0.13, `actions/checkout` to v7, and
+  `setup-uv` to v10.
 - `DropWidget` emits a new `filesDropped` signal with the local paths from a
   drop, and no longer prints to stdout. It refuses drags with no local files.
 - `import mtqt` no longer fails when package metadata is missing, as when it

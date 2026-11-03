@@ -40,14 +40,14 @@ dev = [
     "pytest>=8.3",
     "pytest-qt>=4.4",
     "pytest-cov>=6.0",
-    "ruff>=0.12",
+    "ruff>=0.17.3",
     "pyright>=1.1.400",
     "pre-commit>=4.2",
 ]
 docs = ["mkdocs-material>=9.6", "mkdocstrings[python]>=0.29"]
 
 [build-system]
-requires = ["uv_build>=0.12.1,<0.13.0"]
+requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
@@ -55,12 +55,16 @@ target-version = "py313"
 src = ["src", "tests", "examples"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "D"]
+select = ["E", "F", "I", "UP", "D", "B", "C4", "SIM", "RUF", "PT", "T20"]
 ignore = ["D102", "D104", "D105", "D107", "D203", "D213", "D401", "D413"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
-"examples/**" = ["D"]
+"examples/**" = ["D", "T20"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Qt item-model signatures default parent to an invalid index.
+extend-immutable-calls = ["PySide6.QtCore.QModelIndex"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -70,6 +74,9 @@ qt_api = "pyside6"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--cov=mtqt --cov-report=term-missing"
+qt_log_level_fail = "WARNING"
+# Offscreen platform noise: fonts not installed here, and a missing plugin call.
+qt_log_ignore = ["Populating font family aliases", "propagateSizeHints"]
 
 [tool.coverage.run]
 source_pkgs = ["mtqt"]

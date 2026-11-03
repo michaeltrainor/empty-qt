@@ -76,7 +76,7 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - Google-style docstrings on public classes, functions, and methods that are mtqt's own API. Summary line, then Args / Returns / Raises when they apply. Match `src/mtqt/widgets/labeled_line_edit.py`. Qt virtual overrides (`paintEvent`, `rowCount`, `data`, and similar) do not need a docstring when they only implement the Qt contract. `__init__` is documented on the class. Ruff enforces this with pydocstyle convention `google` (see `pyproject.toml`). `D102` is ignored because Qt overrides are public methods; still document new public Python methods.
 - `pathlib.Path` at Python boundaries
 - `logging.getLogger(__name__)` — no `print` in the library
-- ruff select `E`, `F`, `I`, `UP`, `D`, then `ruff format`. `uv run pyright` (mode `standard`) is a local check, not a CI job.
+- ruff select `E`, `F`, `I`, `UP`, `D`, `B`, `C4`, `SIM`, `RUF`, `PT`, `T20`, then `ruff format`. `uv run pyright` (mode `standard`) also runs in CI.
 - Do not add a node-type plugin loader, evaluator, or palette inside mtqt. Node catalogs belong in the host tool.
 
 ## Claude Code
@@ -95,4 +95,8 @@ Before a pull request is marked ready for review:
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 
-CI (`.github/workflows/ci.yml`) syncs the `examples` dependency group, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pytest`, and `uv run mkdocs build --strict`. Without that group, the scene viewport tests that need pygfx skip locally. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.
+CI (`.github/workflows/ci.yml`) syncs the `examples` dependency group, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without that group, the scene viewport tests that need pygfx skip locally. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
+
+`.github/workflows/qt-latest.yml` tests the newest PySide6 weekly as an early warning, and never blocks a PR. Dependabot opens weekly update PRs, and leaves Python and PySide6 alone because they follow the VFX Reference Platform.
+
+Tests fail on Qt warnings (`qt_log_level_fail`). Add a pattern to `qt_log_ignore` in `pyproject.toml` only for noise from the test platform. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.

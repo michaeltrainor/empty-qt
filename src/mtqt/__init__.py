@@ -22,6 +22,7 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
+    "DropWidget",
     "GraphHistory",
     "LabeledLineEdit",
     "NodeGraph",
@@ -34,9 +35,8 @@ __all__ = [
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",
-    "DropWidget",
+    "__version__",
     "apply_stylesheet",
     "ensure_application",
-    "__version__",
     "load_stylesheet",
 ]

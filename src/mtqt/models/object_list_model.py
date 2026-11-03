@@ -40,7 +40,7 @@ class ObjectListModel(QAbstractListModel):
         self._rows: list[object] = list(rows) if rows is not None else []
         self._display_attr = display_attr
 
-    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
         return len(self._rows)

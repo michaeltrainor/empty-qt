@@ -31,7 +31,9 @@ uv run ruff check
 uv run ruff format
 ```
 
-Ruff select is `E`, `F`, `I`, `UP`, and `D`. `uv run pyright` (mode `standard`) is a local check. It is not a required CI job.
+Ruff select is `E`, `F`, `I`, `UP`, `D`, `B`, `C4`, `SIM`, `RUF`, `PT`, and `T20`. `uv run pyright` (mode `standard`) also runs in CI.
+
+Run `uv sync --extra dev --extra docs --group examples` to match CI. Without that group, the scene viewport tests skip.
 
 ## Docs
 

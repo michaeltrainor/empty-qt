@@ -18,12 +18,13 @@ def test_import_survives_missing_package_metadata(
     def missing(name: str) -> str:
         raise importlib.metadata.PackageNotFoundError(name)
 
-    with monkeypatch.context() as patch:
-        patch.setattr(importlib.metadata, "version", missing)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(importlib.metadata, "version", missing)
+            importlib.reload(mtqt)
+            assert mtqt.__version__ == "0+unknown"
+    finally:
         importlib.reload(mtqt)
-        assert mtqt.__version__ == "0+unknown"
-
-    importlib.reload(mtqt)
     assert mtqt.__version__ == installed
 
 
