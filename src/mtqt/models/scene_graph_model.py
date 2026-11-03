@@ -119,16 +119,16 @@ class SceneGraphModel(QAbstractItemModel):
             return self._root
         return pointer
 
-    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:
         return len(self._node_from_index(parent).children)
 
-    def columnCount(self, parent: _ModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def columnCount(self, parent: _ModelIndex = QModelIndex()) -> int:
         return 1
 
-    def hasChildren(self, parent: _ModelIndex = QModelIndex()) -> bool:  # noqa: N802
+    def hasChildren(self, parent: _ModelIndex = QModelIndex()) -> bool:
         return bool(self._node_from_index(parent).children)
 
-    def index(  # noqa: N802
+    def index(
         self,
         row: int,
         column: int,
@@ -164,7 +164,7 @@ class SceneGraphModel(QAbstractItemModel):
             return node
         return None
 
-    def headerData(  # noqa: N802
+    def headerData(
         self,
         section: int,
         orientation: Qt.Orientation,

@@ -50,17 +50,17 @@ class ObjectTableModel(QAbstractTableModel):
             return [item.name for item in fields(first)]
         return []
 
-    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def rowCount(self, parent: _ModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
         return len(self._rows)
 
-    def columnCount(self, parent: _ModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def columnCount(self, parent: _ModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
         return len(self._columns)
 
-    def headerData(  # noqa: N802
+    def headerData(
         self,
         section: int,
         orientation: Qt.Orientation,
@@ -90,7 +90,7 @@ class ObjectTableModel(QAbstractTableModel):
             return str(value)
         return value
 
-    def setData(  # noqa: N802
+    def setData(
         self,
         index: _ModelIndex,
         value: object,

@@ -95,7 +95,7 @@ class SceneViewportWindow(QMainWindow):
 
     Maya-aligned tools (toolbar + hotkeys): **Q** select, **W** move,
     **E** rotate, **R** scale; World/Local on the toolbar; **D** edit pivot.
-    Shading **1**–**6** (bbox / wire+shaded / flat / wire / shaded / textured).
+    Shading **1**-**6** (bbox / wire+shaded / flat / wire / shaded / textured).
     **P** parent to last selected, **Shift+P** unparent. Ctrl+D duplicate,
     rename, **F** frame, Ctrl+I isolate. File menu saves/loads the scene.
     Ctrl+Z / Ctrl+Y undo and redo.
@@ -807,10 +807,7 @@ class SceneViewportWindow(QMainWindow):
         added_lights: list[LightComponent] = []
         for name in to_copy:
             src = self._world.transforms[name]
-            if src.parent in name_map:
-                new_parent = name_map[src.parent]
-            else:
-                new_parent = src.parent
+            new_parent = name_map.get(src.parent, src.parent)
             position = src.position
             if name in roots:
                 position = (position[0] + 1.0, position[1], position[2])
@@ -920,7 +917,7 @@ class SceneViewportWindow(QMainWindow):
             updates = dict(self._visibility_backup)
             self._visibility_backup = None
         else:
-            updates = {name: True for name in self._world.transforms}
+            updates = dict.fromkeys(self._world.transforms, True)
         self._set_visibility(updates, label="Show All")
 
     def _frame_selection(self) -> None:
@@ -979,10 +976,7 @@ class SceneViewportWindow(QMainWindow):
                     self._apply_stored_transform(component)
         select = list(step.transforms_after or step.transforms_before)
         if step.renames:
-            if undo:
-                select = list(step.renames.keys())
-            else:
-                select = list(step.renames.values())
+            select = list(step.renames.keys() if undo else step.renames.values())
         if step.added is not None and not undo:
             select = [item.name for item in step.added.transforms]
         if step.removed is not None and undo:

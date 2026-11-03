@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Literal, get_args, get_origin
+from typing import Annotated, Any, Literal, SupportsFloat, cast, get_args, get_origin
 
 import annotated_types as at
 from pydantic import BaseModel, ValidationError
@@ -87,9 +87,7 @@ def _field_read_only(info: FieldInfo) -> bool:
     if info.frozen:
         return True
     extra = info.json_schema_extra
-    if isinstance(extra, dict) and extra.get("mtqt_read_only"):
-        return True
-    return False
+    return isinstance(extra, dict) and bool(extra.get("mtqt_read_only"))
 
 
 def _field_editor_kind(info: FieldInfo) -> str | None:
@@ -108,13 +106,13 @@ def _numeric_bounds(info: FieldInfo) -> tuple[float | None, float | None]:
     hi: float | None = None
     for item in info.metadata:
         if isinstance(item, at.Ge):
-            lo = float(item.ge)
+            lo = float(cast(SupportsFloat, item.ge))
         elif isinstance(item, at.Gt):
-            lo = float(item.gt)
+            lo = float(cast(SupportsFloat, item.gt))
         elif isinstance(item, at.Le):
-            hi = float(item.le)
+            hi = float(cast(SupportsFloat, item.le))
         elif isinstance(item, at.Lt):
-            hi = float(item.lt)
+            hi = float(cast(SupportsFloat, item.lt))
     return lo, hi
 
 
@@ -290,7 +288,7 @@ class PropertiesPanel(QWidget):
 
     Supported field types: ``str``, ``bool``, ``int``, ``float``,
     ``Literal[...]``, ``Enum``, ``pathlib.Path``, fixed-length
-    ``tuple[float, ...]`` (2–4), and color strings marked with
+    ``tuple[float, ...]`` (2-4), and color strings marked with
     ``Field(json_schema_extra={"mtqt_editor": "color"})``. Unsupported
     fields render as a read-only summary.
 

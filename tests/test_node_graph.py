@@ -184,10 +184,12 @@ def test_widget_rejects_cycle_from_a_port_drop(qtbot) -> None:
     qtbot.addWidget(widget)
     source = widget.scene.node_item("c")
     target = widget.scene.node_item("a")
-    assert source is not None and target is not None
+    assert source is not None
+    assert target is not None
     output = source.port_item("out", PortDirection.OUT)
     inlet = target.port_item("in", PortDirection.IN)
-    assert output is not None and inlet is not None
+    assert output is not None
+    assert inlet is not None
 
     with qtbot.waitSignal(widget.connectionRejected) as blocker:
         widget.scene.begin_draft(output)

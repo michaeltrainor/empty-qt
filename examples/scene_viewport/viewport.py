@@ -290,7 +290,7 @@ class ViewportController:
         return self._draw_mode
 
     def set_draw_mode(self, mode: DrawMode) -> None:
-        """Switch Maya-style viewport draw mode (hotkeys 1–6).
+        """Switch Maya-style viewport draw mode (hotkeys 1-6).
 
         Args:
             mode: ``bounding_box``, ``wire_shaded``, ``flat``, ``wireframe``,

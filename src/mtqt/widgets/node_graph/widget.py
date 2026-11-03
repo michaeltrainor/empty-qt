@@ -196,9 +196,9 @@ class NodeGraphWidget(QWidget):
         super().closeEvent(event)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self._view or watched is self._view.viewport():
-            if self._handle_canvas_event(event):
-                return True
+        is_canvas = watched is self._view or watched is self._view.viewport()
+        if is_canvas and self._handle_canvas_event(event):
+            return True
         return super().eventFilter(watched, event)
 
     def showEvent(self, event: QShowEvent) -> None:
