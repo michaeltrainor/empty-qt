@@ -33,7 +33,8 @@ jobs:
             libxcb-cursor0
 
       - name: Sync
-        run: uv sync --extra dev --extra docs --frozen
+        # The examples group lets the scene viewport tests run instead of skip.
+        run: uv sync --extra dev --extra docs --group examples --frozen
 
       - name: Ruff
         run: uv run ruff check

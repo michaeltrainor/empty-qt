@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("pygfx")
+
 from examples.scene_viewport.mesh.primitives import box, plane, uv_sphere
 from examples.scene_viewport.textures import load_albedo_texture
 from PySide6.QtGui import QColor, QImage

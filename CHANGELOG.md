@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix CI, which stopped at test collection without pygfx. CI now installs the
+  `examples` group, and `tests/test_scene_textures.py` skips when pygfx is
+  missing. The pr-reviewer agent now merges only after every CI check has
+  finished and passed; a local run no longer replaces CI.
 - Fix light shadows for all kinds: directional positive near/far frustum,
   point/spot depth pinning (pygfx resets near≈0 each frame), shared light
   aim for directional/spot, Create → Spot Light, and ground planes default
