@@ -12,7 +12,7 @@ uv run mkdocs build
 uv build
 ```
 
-Install git hooks (after extras are synced):
+Install git hooks (after `uv sync --all-packages`):
 
 ```bash
 uv run pre-commit install
@@ -84,7 +84,18 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 
 ## Claude Code
 
-This project is managed with Claude Code. `AGENTS.md` holds the project rules. `.claude/agents/pr-reviewer.md` is the review and merge agent, `.claude/skills/pyside6/` is the Qt safety skill, and `.claude/settings.json` sets shared permissions and a hook that runs `ruff format` on edited Python files. Put personal overrides in `.claude/settings.local.json`, which is gitignored.
+This project is managed with Claude Code.
+
+- `AGENTS.md` holds the project rules. Claude Code reads it only when no `CLAUDE.md` exists, so don't add one; if you must, make its first line `@AGENTS.md`.
+- `.claude/rules/` holds path-scoped notes that load only when Claude touches matching files: `library.md` for `src/mtqt/` and `scene-viewport.md` for `apps/scene_viewport/`.
+- `.claude/skills/pyside6/` is the Qt safety skill. `.claude/skills/ship/` is `/ship`, which takes a change from `scripts/check` to a reviewed PR.
+- `.claude/agents/pr-reviewer.md` reviews and squash-merges PRs. It runs on Sonnet in its own worktree and can't edit files.
+- `.claude/settings.json` sets shared permissions and three hooks:
+  - SessionStart runs `uv sync --all-packages --locked`, and warns when `uv.lock` is stale.
+  - PreToolUse runs `.claude/hooks/guard_merge.py`, which blocks `gh pr merge` and the REST merge endpoint everywhere except `pr-reviewer`, including inside `bash -c` and `eval`. It tokenizes commands, so quoted text and heredocs that mention merging pass, and it blocks a merge command it can't parse. It's a guardrail, not a security boundary: a merge run from a script file isn't detected. It needs `python3`, and `tests/test_guard_merge.py` covers it. A deny rule can't do this job, because deny rules also bind subagents. Your own terminal merges aren't affected.
+  - PostToolUse runs `ruff format` on edited Python files.
+
+Put personal overrides in `.claude/settings.local.json`, which is gitignored.
 
 ## Pull requests
 
@@ -93,7 +104,7 @@ Before a pull request is marked ready for review:
 - Google-style docstrings on new public API, as in Conventions above.
 - pytest-qt tests under `tests/` for every public widget, using the `qtbot` fixture. Run `uv run pytest`.
 - `uv run ruff check` and `uv run ruff format` are clean.
-- MkDocs pages under `docs/` are updated for anything a user or contributor would notice (new widgets, examples, commands, or the PR process). `mkdocs.yml` uses `docstring_style: google`. Verify with `uv run mkdocs build --strict` after `uv sync --extra dev --extra docs`.
+- MkDocs pages under `docs/` are updated for anything a user or contributor would notice (new widgets, examples, commands, or the PR process). `mkdocs.yml` uses `docstring_style: google`. Verify with `uv run mkdocs build --strict` after `uv sync --all-packages`.
 - `CHANGELOG.md` is updated under `## Unreleased` in the same PR, before merge. Do not add a follow-up commit after merge. Dependabot PRs need no changelog or docs update, and the `gate` job skips them.
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.

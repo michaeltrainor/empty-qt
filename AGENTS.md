@@ -50,7 +50,9 @@ Every PR that is merged updates `CHANGELOG.md` under `## Unreleased` in the same
 
 ## Review and merge
 
-When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes. The parent agent must not merge a ready PR itself in place of `pr-reviewer`. Spawn or follow the project agent named `pr-reviewer`.
+When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes. The parent agent must not merge a ready PR itself in place of `pr-reviewer`. Spawn or follow the project agent named `pr-reviewer`. In Claude Code, a PreToolUse hook enforces this, and `/ship` runs the whole flow from `scripts/check` to the handoff.
+
+Path-scoped notes for `src/mtqt/` and `apps/scene_viewport/` live in `.claude/rules/`.
 
 ## Node graph
 
