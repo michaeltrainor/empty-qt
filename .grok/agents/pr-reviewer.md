@@ -40,23 +40,15 @@ Read the changed files. Check them against `AGENTS.md`:
 
 ## Run checks
 
-This repo often has a dirty working tree. Never stash, reset, or checkout over a dirty tree. Do not switch branches if that would disturb uncommitted work.
-
-If you already have a clean checkout of the PR, run:
+CI is the gate. Wait for every check to finish on the PR's current head commit:
 
 ```bash
-uv run ruff check
-uv run pytest
-uv run mkdocs build --strict
+gh pr checks <number> --repo michaeltrainor/empty-qt --watch
 ```
 
-If you cannot check out without disturbing the dirty tree, do not check out. Trust CI instead:
+A local run never replaces CI. A developer environment can hold packages that CI does not install, so local tests can pass while CI fails. Pending counts as not passed: do not merge until the checks have finished.
 
-```bash
-gh pr checks <number> --repo michaeltrainor/empty-qt
-```
-
-Prefer `gh` read-only inspection plus CI status whenever the worktree is dirty.
+This repo often has a dirty working tree. Never stash, reset, or checkout over a dirty tree. Do not switch branches if that would disturb uncommitted work. If you want to run the code yourself, use a separate `git worktree` and leave the main checkout alone.
 
 ## Post one review
 
@@ -89,7 +81,7 @@ Merge only when all of these are true:
 - The review found no bug-level issues.
 - `CHANGELOG.md` is in the diff.
 - `docs/` is in the diff when `src/`, `examples/`, `.github/`, or `pyproject.toml` changed.
-- Checks are green, or the local `ruff check`, `pytest`, and `mkdocs build --strict` commands passed.
+- Every CI check on the PR's current head commit has finished and passed.
 
 ```bash
 gh pr merge <number> --repo michaeltrainor/empty-qt --squash --delete-branch

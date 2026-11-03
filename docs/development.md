@@ -89,6 +89,6 @@ Before a pull request is marked ready for review:
 - MkDocs pages under `docs/` are updated for anything a user or contributor would notice (new widgets, examples, commands, or the PR process). `mkdocs.yml` uses `docstring_style: google`. Verify with `uv run mkdocs build --strict` after `uv sync --extra dev --extra docs`.
 - `CHANGELOG.md` is updated under `## Unreleased` in the same PR, before merge. Do not add a follow-up commit after merge.
 
-When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes. Do not merge a ready PR in place of `pr-reviewer`.
+When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 
-CI (`.github/workflows/ci.yml`) runs `uv run ruff check`, `uv run ruff format --check`, `uv run pytest`, and `uv run mkdocs build --strict`. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.
+CI (`.github/workflows/ci.yml`) syncs the `examples` dependency group, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pytest`, and `uv run mkdocs build --strict`. Without that group, the scene viewport tests that need pygfx skip locally. `.github/workflows/pr-ready.yml` fails a ready PR that does not update `CHANGELOG.md`, or that changes `src/`, `examples/`, `.github/`, or `pyproject.toml` without updating `docs/`. That workflow does not merge.
