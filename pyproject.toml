@@ -76,7 +76,11 @@ pythonpath = ["."]
 addopts = "--cov=mtqt --cov-report=term-missing"
 qt_log_level_fail = "WARNING"
 # Offscreen platform noise: fonts not installed here, and a missing plugin call.
-qt_log_ignore = ["Populating font family aliases", "propagateSizeHints"]
+qt_log_ignore = [
+    "Populating font family aliases",
+    "propagateSizeHints",
+    "Cannot find font directory",
+]
 
 [tool.coverage.run]
 source_pkgs = ["mtqt"]
