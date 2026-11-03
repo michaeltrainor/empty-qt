@@ -20,10 +20,14 @@ class DropWidgetWindow(QMainWindow):
         central = QWidget(self)
         hint = QLabel("Drop files onto the dashed area.", central)
         drop = DropWidget(central)
+        dropped = QLabel("", central)
+        dropped.setWordWrap(True)
+        drop.filesDropped.connect(lambda files: dropped.setText("\n".join(files)))
 
         layout = QVBoxLayout(central)
         layout.addWidget(hint)
         layout.addWidget(drop, stretch=1)
+        layout.addWidget(dropped)
         self.setCentralWidget(central)
         apply_stylesheet(self, "base", "widgets")
 

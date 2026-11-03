@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
+    QLabel,
     QListView,
     QMainWindow,
     QPlainTextEdit,
@@ -348,8 +349,12 @@ class GalleryWindow(QMainWindow):
     def _build_drop_tab(self) -> QWidget:
         page = QWidget(self)
         drop = DropWidget(page)
+        dropped = QLabel("", page)
+        dropped.setWordWrap(True)
+        drop.filesDropped.connect(lambda files: dropped.setText("\n".join(files)))
         layout = QVBoxLayout(page)
         layout.addWidget(drop, stretch=1)
+        layout.addWidget(dropped)
         return page
 
 

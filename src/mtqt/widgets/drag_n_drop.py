@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QMimeData, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -24,15 +24,27 @@ _PEN_WIDTH = 2
 _LABEL_PIXEL_SIZE = 16
 
 
-class DropWidget(QWidget):
-    """A ``QWidget`` drop target that accepts file drops.
+def _local_files(mime: QMimeData) -> list[str]:
+    """Return the local file paths in ``mime``, skipping non-file URLs."""
+    return [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
 
-    Draws a dashed ``Drop Here`` area and can be shown as a window.
+
+class DropWidget(QWidget):
+    """A ``QWidget`` drop target that accepts local file drops.
+
+    Draws a dashed ``Drop Here`` area and can be shown as a window. A drag
+    with no local files, such as plain text or a web link, is refused.
+
+    ``filesDropped`` emits a ``list[str]`` of local paths. It uses ``str``
+    because ``Path`` is not a Qt metatype, so wrap each one in
+    ``pathlib.Path`` in Python.
 
     Args:
         parent: Qt parent. ``None`` means Python owns this widget until it
             is parented or goes out of scope.
     """
+
+    filesDropped = Signal(list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -74,11 +86,18 @@ class DropWidget(QWidget):
         painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "Drop Here")
 
     def dragEnterEvent(self, event: QDragEnterEvent, /) -> None:
-        event.accept()
+        if _local_files(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def dropEvent(self, event: QDropEvent, /) -> None:
-        print(event.type())
-        print(event.mimeData().urls())
+        files = _local_files(event.mimeData())
+        if not files:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.filesDropped.emit(files)
 
 
 def main() -> int:

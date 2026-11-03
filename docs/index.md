@@ -13,9 +13,11 @@ CY2025 hosts on Python 3.11 cannot install this package. That is intentional.
 
 ## Install
 
+mtqt is not on PyPI yet. Install it from the repository, which needs read access:
+
 ```bash
-uv add "mtqt"
-pip install mtqt
+uv add "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
+pip install "mtqt @ git+ssh://git@github.com/michaeltrainor/empty-qt.git"
 ```
 
 From a source checkout:

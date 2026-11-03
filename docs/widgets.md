@@ -29,6 +29,18 @@ picker.path = Path("/tmp/scene.ma")
 picker.pathChanged.connect(lambda s: print(Path(s) if s else None))
 ```
 
+## File drops
+
+`DropWidget` is a dashed drop area for local files. `filesDropped` emits a `list[str]` of paths, skipping any non-file URLs in the same drag. A drag with no local files is refused, and the signal does not fire.
+
+```python
+from pathlib import Path
+from mtqt import DropWidget
+
+drop = DropWidget(parent=window)
+drop.filesDropped.connect(lambda files: print([Path(f) for f in files]))
+```
+
 ## Properties panel
 
 `PropertiesPanel` builds a form from a **pydantic** `BaseModel` instance. The model type is the field profile (titles, frozen/read-only fields, `ge`/`le` bounds, `Literal` / `Enum` choices, types). The widget does not know about meshes or any host domain.
