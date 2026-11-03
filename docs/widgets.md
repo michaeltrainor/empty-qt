@@ -49,6 +49,38 @@ Supported fields: `str`, `bool`, `int`, `float`, `Literal`, `Enum`, `pathlib.Pat
 
 Signals: `modelChanged` (updated model), `fieldChanged(field, value, model)`, `validationFailed(field, message)`. Host tools register callbacks with `register_handler` / `register_field_handler` so business logic stays outside the widget. Editability is controlled with `set_editable_check` and/or `set_field_editable` (overrides schema `frozen` / `mtqt_read_only`). Calling `set_model` again with the same model type refreshes values in place. Refreshes, rebuilds, and clears that run from inside a field commit are deferred to the next event-loop tick so spin boxes are not touched mid-click.
 
+### Dragging, sliders, and display units
+
+- **Drag to change numbers.** Drag a numeric row's label left or right to change its value; vector rows have a draggable X/Y/Z label per component. A bounded field spans its range in about 300px, and an unbounded one moves a quarter of its step per pixel. Hold **Ctrl** for fine steps (x0.1) or **Shift** for coarse ones (x10), and press **Esc** to cancel. A plain click does nothing.
+- **Sliders.** `int` and `float` fields with both a lower and an upper bound (`ge`/`gt` and `le`/`lt`) get a slider next to the number. `mtqt_slider: False` turns it off, and `mtqt_soft_range: (low, high)` gives the slider a narrower range than the bounds (or a range for an unbounded field) while typed values can still go past it.
+- **Display units.** `mtqt_display: "degrees"` stores radians and shows degrees; `"percent"` stores fractions and shows percent. Both work on floats and float tuples. `mtqt_suffix: " m"` adds text after the number without converting it. Vector rows show the unit in the row label, as in "Rotation (°)". Vector components you didn't edit commit their stored value exactly, so display rounding never changes them.
+- **Live previews.** Drags and slider moves emit `fieldPreviewed(field, value, model)` for each step, with a validated copy of the model; `panel.model` and registered handlers wait for the release, which emits `fieldChanged` once. A host can update its view live from `fieldPreviewed` and record one undo step on `fieldChanged`. Cancelling a drag previews the start value so the host can put it back. `PropertiesBook` forwards `fieldPreviewed` too.
+
+```python
+import math
+
+
+class LightProps(BaseModel):
+    angle: float = Field(
+        default=math.pi / 4,
+        ge=0.0,
+        le=math.pi,
+        json_schema_extra={"mtqt_display": "degrees"},
+    )
+    falloff: float = Field(
+        default=10.0,
+        ge=0.0,
+        json_schema_extra={"mtqt_soft_range": (0.0, 50.0), "mtqt_suffix": " m"},
+    )
+    mix: float = Field(
+        default=0.5, ge=0.0, le=1.0, json_schema_extra={"mtqt_display": "percent"}
+    )
+
+
+panel.fieldPreviewed.connect(lambda field, value, model: viewport.show(model))
+panel.fieldChanged.connect(lambda field, value, model: history.record(model))
+```
+
 ```python
 from pathlib import Path
 from pydantic import BaseModel, Field

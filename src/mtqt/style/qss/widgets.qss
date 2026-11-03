@@ -2,7 +2,7 @@
 
 LabeledLineEdit QLabel {
     min-width: 72px;
-    color: #8b919c;
+    color: #b0b0b0;
 }
 
 LabeledLineEdit QLineEdit {
@@ -11,7 +11,7 @@ LabeledLineEdit QLineEdit {
 
 LabeledLineEdit[invalid="true"] QLineEdit {
     border: 1px solid #e85d5d;
-    background-color: #3a2226;
+    background-color: #5e3236;
 }
 
 #PathPicker QLineEdit {
@@ -23,72 +23,172 @@ LabeledLineEdit[invalid="true"] QLineEdit {
 }
 
 #PropertiesBook {
-    background-color: #1a1d24;
+    background-color: #3c3c3c;
 }
 
 #PropertiesBookTabs::pane {
     border: none;
-    border-top: 1px solid #2c313c;
-    background: #1a1d24;
+    border-top: 1px solid #565656;
+    background: #3c3c3c;
 }
 
 #PropertiesPanel {
-    background-color: #1a1d24;
+    background-color: #3c3c3c;
 }
 
 #PropertiesPanelEmpty {
-    color: #8b919c;
-    padding: 16px 14px;
+    color: #b0b0b0;
+    padding: 10px 10px;
     font-size: 12px;
 }
 
 #PropertiesPanelError {
-    color: #e85d5d;
-    padding: 8px 12px;
-    background-color: #3a2226;
-    border-radius: 6px;
-    margin: 6px 8px;
+    color: #ff9a9a;
+    padding: 4px 8px;
+    background-color: #5e3236;
+    border-radius: 3px;
+    margin: 4px 8px;
 }
 
 #PropertiesColorSwatch {
-    border: 1px solid #2c313c;
-    border-radius: 6px;
-    min-width: 28px;
-    min-height: 22px;
+    border: 1px solid #565656;
+    border-radius: 3px;
+    min-width: 22px;
+    min-height: 20px;
+    padding: 0;
 }
 
 #PropertiesColorEditor[invalid="true"] QLineEdit,
 #PropertiesVecEditor[invalid="true"] QDoubleSpinBox,
+#PropertiesNumberEditor[invalid="true"] QSpinBox,
+#PropertiesNumberEditor[invalid="true"] QDoubleSpinBox,
 PropertiesPanel QLineEdit[invalid="true"],
 PropertiesPanel QSpinBox[invalid="true"],
 PropertiesPanel QDoubleSpinBox[invalid="true"] {
     border: 1px solid #e85d5d;
-    background-color: #3a2226;
+    background-color: #5e3236;
 }
 
 #PropertiesPanel QLabel {
-    color: #8b919c;
+    color: #b0b0b0;
+}
+
+/* —— Properties: compact attribute-editor density ——
+   Matches DCC attribute editors (Maya, Blender, Houdini): 12px text,
+   ~20px fields, small radii. Row spacing lives in PropertiesPanel. */
+
+#PropertiesBook,
+#PropertiesPanel {
+    font-size: 12px;
+}
+
+#PropertiesBookTabs QTabBar::tab {
+    padding: 4px 10px;
+    margin-right: 0;
+}
+
+#PropertiesPanel QLineEdit,
+#PropertiesPanel QSpinBox,
+#PropertiesPanel QDoubleSpinBox,
+#PropertiesPanel QComboBox {
+    border-radius: 3px;
+    padding: 1px 5px;
+    min-height: 18px;
+    max-height: 18px;
+}
+
+#PropertiesPanel QSpinBox::up-button,
+#PropertiesPanel QDoubleSpinBox::up-button,
+#PropertiesPanel QSpinBox::down-button,
+#PropertiesPanel QDoubleSpinBox::down-button {
+    width: 12px;
+}
+
+#PropertiesPanel QComboBox::drop-down {
+    width: 16px;
+}
+
+#PropertiesPanel QPushButton {
+    border-radius: 3px;
+    padding: 1px 8px;
+    min-height: 18px;
+}
+
+#PropertiesPanel QCheckBox {
+    spacing: 4px;
+}
+
+#PropertiesPanel QCheckBox::indicator {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+}
+
+#PropertiesPanel #PathPicker QLineEdit {
+    min-width: 0;
+}
+
+#PropertiesPanel #PathPickerBrowse {
+    min-width: 0;
+}
+
+/* Draggable labels: numeric row labels and vector X/Y/Z labels. */
+#PropertiesPanel QLabel[scrub="true"]:hover {
+    color: #eeeeee;
+}
+
+#PropertiesAxisLabel {
+    color: #8c8c8c;
+    padding: 0 0 0 2px;
+}
+
+#PropertiesSlider::groove:horizontal {
+    height: 4px;
+    background: #2f2f2f;
+    border: 1px solid #565656;
+    border-radius: 2px;
+}
+
+#PropertiesSlider::sub-page:horizontal {
+    background: #6a6a6a;
+    border: 1px solid #565656;
+    border-radius: 2px;
+}
+
+#PropertiesSlider::handle:horizontal {
+    width: 8px;
+    margin: -5px 0;
+    border-radius: 2px;
+    background: #b0b0b0;
+}
+
+#PropertiesSlider::handle:horizontal:hover {
+    background: #eeeeee;
+}
+
+#PropertiesSlider::handle:horizontal:disabled {
+    background: #6a6a6a;
 }
 
 #NodeGraphView {
-    border: 1px solid #2c313c;
+    border: 1px solid #565656;
     border-radius: 8px;
-    background-color: #12141a;
+    background-color: #2f2f2f;
 }
 
 #NodeGraphDefaultContent {
     background: transparent;
-    color: #e8eaef;
+    color: #eeeeee;
 }
 
 #SceneGraphTree {
-    background-color: #1a1d24;
+    background-color: #3c3c3c;
 }
 
 #SceneGraphTreeView {
     border: none;
     border-radius: 0;
-    background-color: #12141a;
+    background-color: #2f2f2f;
     padding: 4px;
 }
 
@@ -108,7 +208,7 @@ PropertiesPanel QDoubleSpinBox[invalid="true"] {
 }
 
 #SceneViewportSplitter::handle {
-    background-color: #12141a;
+    background-color: #2f2f2f;
 }
 
 #SceneViewportSplitter::handle:hover {
@@ -116,6 +216,6 @@ PropertiesPanel QDoubleSpinBox[invalid="true"] {
 }
 
 #SceneViewportCanvas {
-    background-color: #0c0e12;
+    background-color: #5c5c5c;
     border: none;
 }

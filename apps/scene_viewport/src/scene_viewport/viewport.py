@@ -25,7 +25,7 @@ from scene_viewport.gizmo import (
     MayaTransformGizmo,
 )
 from scene_viewport.mesh.geometry import geometry_for
-from scene_viewport.settings import AppSettings
+from scene_viewport.settings import AppSettings, renderer_gamma
 from scene_viewport.textures import load_albedo_texture
 from scene_viewport.xform_math import (
     as_vec3,
@@ -156,7 +156,7 @@ class ViewportController:
 
         self.renderer = gfx.renderers.WgpuRenderer(
             canvas,
-            gamma_correction=self._settings.gamma,
+            gamma_correction=renderer_gamma(self._settings.gamma),
         )
         self.scene = gfx.Scene()
         self._rebuild_environment()
@@ -229,7 +229,7 @@ class ViewportController:
             settings: Preferences to apply (grid, ambient, shadows, gizmo).
         """
         self._settings = settings.model_copy(deep=True)
-        self.renderer.gamma_correction = settings.gamma
+        self.renderer.gamma_correction = renderer_gamma(settings.gamma)
         self._rebuild_environment()
         if self._ambient is not None:
             self._ambient.intensity = self._effective_ambient()
@@ -267,11 +267,15 @@ class ViewportController:
         )
         if self._background is not None and self._background.parent is not None:
             self._background.parent.remove(self._background)
+        # Background materials are unlit: lights, exposure, and scene objects
+        # never change them. Solid mode is also independent of the IBL map.
         if settings.background_mode == "skybox":
             self._background = gfx.Background(
                 None,
                 gfx.BackgroundSkyboxMaterial(map=self._env_map),
             )
+        elif settings.background_mode == "solid":
+            self._background = gfx.Background.from_color(settings.background_color)
         else:
             self._background = gfx.Background.from_color(
                 settings.background_bottom,
@@ -1117,8 +1121,10 @@ class ViewportController:
         if self._grid is not None and self._grid.parent is not None:
             self._grid.parent.remove(self._grid)
 
-        # Same muted tone for all lines; axis tint is applied below.
-        line = (0.32, 0.32, 0.32, 1.0)
+        # Maya-like dark lines on the gray background; axis tint is below.
+        # GridHelper draws with an unlit line material, so lights never
+        # shade it.
+        line = (0.24, 0.24, 0.24, 1.0)
         grid = gfx.GridHelper(
             size=settings.grid_size,
             divisions=int(settings.grid_divisions),
