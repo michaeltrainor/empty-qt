@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable, Sequence
 from typing import Literal
 
@@ -41,6 +42,39 @@ _BBOX_SELECTED_COLOR = "#5eb0ff"
 _ADDITIVE_MODIFIERS = frozenset({"Shift", "Control", "Meta"})
 
 Vec3 = tuple[float, float, float]
+
+# pygfx ships no type annotations, so pyright infers each parameter from its
+# default value: `intensity=1` becomes `int`, and passing a float is flagged.
+# The `pyright: ignore[reportArgumentType]` comments in this module cover only
+# those calls into pygfx, plus one `set_object(None)` that pygfx accepts.
+
+
+def _material_of[M: gfx.Material](obj: gfx.WorldObject, kind: type[M]) -> M:
+    """Return ``obj.material`` as ``kind``.
+
+    Raises:
+        TypeError: If the object has no material, or one of another type.
+    """
+    material = obj.material
+    if not isinstance(material, kind):
+        msg = f"{obj!r} has material {material!r}, expected {kind.__name__}"
+        raise TypeError(msg)
+    return material
+
+
+def _light_shadow(light: gfx.Light) -> gfx.LightShadow:
+    """Return the light's shadow.
+
+    Raises:
+        TypeError: If the light has no shadow, as with an ambient light.
+    """
+    shadow = light.shadow
+    if not isinstance(shadow, gfx.LightShadow):
+        msg = f"{light!r} has no shadow"
+        raise TypeError(msg)
+    return shadow
+
+
 DrawMode = Literal[
     "bounding_box",
     "wire_shaded",
@@ -114,6 +148,11 @@ class ViewportController:
         self._env_map: gfx.Texture | None = None
         self._albedo_cache: dict[str, gfx.Texture | None] = {}
         self._light_aim: gfx.WorldObject | None = None
+        # Pinned (near, far) for each patched point or spot shadow.
+        # See _pin_perspective_shadow_depth.
+        self._shadow_depth: weakref.WeakKeyDictionary[
+            gfx.LightShadow, tuple[float, float]
+        ] = weakref.WeakKeyDictionary()
 
         self.renderer = gfx.renderers.WgpuRenderer(
             canvas,
@@ -166,7 +205,7 @@ class ViewportController:
         for component in lights:
             self._add_light(component)
 
-        self.camera = gfx.PerspectiveCamera(50, 16 / 9)
+        self.camera = gfx.PerspectiveCamera(50, 16 / 9)  # pyright: ignore[reportArgumentType]
         self.camera.local.position = (5.5, 4.0, 6.5)
         self.camera.depth_range = (0.05, 500.0)
         self.camera.show_pos((0.0, 0.4, 0.0))
@@ -253,7 +292,7 @@ class ViewportController:
     def _refresh_outline_thickness(self) -> None:
         thickness = self._settings.outline_thickness
         for outline in self._outlines.values():
-            outline.material.wireframe_thickness = thickness
+            _material_of(outline, gfx.MeshBasicMaterial).wireframe_thickness = thickness
 
     def _albedo_texture(self, component: MeshComponent) -> gfx.Texture | None:
         """Return a cached albedo texture for ``component``, if any."""
@@ -317,7 +356,7 @@ class ViewportController:
         return gfx.MeshBasicMaterial(
             color=component.color,
             wireframe=wireframe,
-            wireframe_thickness=self._settings.outline_thickness,
+            wireframe_thickness=self._settings.outline_thickness,  # pyright: ignore[reportArgumentType]
             pick_write=True,
         )
 
@@ -361,6 +400,9 @@ class ViewportController:
     def _aabb_line_geometry(mesh: gfx.Mesh) -> gfx.Geometry:
         """Build 12 line segments for the mesh geometry AABB."""
         bounds = mesh.get_geometry_bounding_box()
+        if bounds is None:
+            msg = f"mesh {mesh.name!r} has no geometry bounds"
+            raise ValueError(msg)
         mn = np.asarray(bounds[0], dtype=np.float32)
         mx = np.asarray(bounds[1], dtype=np.float32)
         corners = np.array(
@@ -657,14 +699,14 @@ class ViewportController:
         size = float(np.linalg.norm(extent))
         proxy = gfx.Mesh(
             gfx.box_geometry(
-                float(extent[0]),
-                float(extent[1]),
-                float(extent[2]),
+                float(extent[0]),  # pyright: ignore[reportArgumentType]
+                float(extent[1]),  # pyright: ignore[reportArgumentType]
+                float(extent[2]),  # pyright: ignore[reportArgumentType]
             ),
             gfx.MeshBasicMaterial(opacity=0.0),
         )
         proxy.local.position = (float(center[0]), float(center[1]), float(center[2]))
-        self.camera.show_object(proxy, scale=1.35)
+        self.camera.show_object(proxy, scale=1.35)  # pyright: ignore[reportArgumentType]
         near = max(0.05, size * 0.02)
         far = max(near * 200.0, size * 40.0, 50.0)
         self.camera.depth_range = (near, min(far, 5000.0))
@@ -932,8 +974,10 @@ class ViewportController:
         if component.cast_shadow:
             self._configure_light_shadow(light, component.kind)
         helper = self._light_helpers.get(component.name)
-        if helper is not None and hasattr(helper, "material"):
-            helper.material.color = component.color
+        material = getattr(helper, "material", None)
+        # Point helpers use a mesh material; directional and spot helpers, lines.
+        if isinstance(material, (gfx.MeshBasicMaterial, gfx.LineMaterial)):
+            material.color = component.color
         self._canvas.request_draw()
 
     def _is_descendant(self, ancestor: str, name: str) -> bool:
@@ -969,10 +1013,10 @@ class ViewportController:
         ``depth_range = (far / 1e6, far)``, which is effectively near≈0 and
         causes the same contact gap we saw on directionals.
         """
-        shadow = light.shadow
-        shadow._mtqt_shadow_near = float(near)
-        shadow._mtqt_shadow_far = float(max(far, near + 1.0))
-        if getattr(shadow, "_mtqt_depth_pinned", False):
+        shadow = _light_shadow(light)
+        already_pinned = shadow in self._shadow_depth
+        self._shadow_depth[shadow] = (float(near), float(max(far, near + 1.0)))
+        if already_pinned:
             return
 
         original = shadow._update_matrix
@@ -982,17 +1026,16 @@ class ViewportController:
             *,
             _original=original,
             _shadow=shadow,
+            _depth=self._shadow_depth,
         ) -> None:
             _original(light_obj)
-            pinned_near = float(_shadow._mtqt_shadow_near)
-            pinned_far = float(_shadow._mtqt_shadow_far)
+            pinned_near, pinned_far = _depth[_shadow]
             _shadow.camera.depth_range = (
                 pinned_near,
                 max(pinned_far, pinned_near + 1.0),
             )
 
         shadow._update_matrix = _update_matrix  # type: ignore[method-assign]
-        shadow._mtqt_depth_pinned = True
 
     def _configure_light_shadow(self, light: gfx.Light, kind: str) -> None:
         """Tune shadow map bias and frustum for this scene's scale.
@@ -1001,7 +1044,7 @@ class ViewportController:
         Point/spot: pin perspective near/far so pygfx cannot reset near≈0.
         """
         settings = self._settings
-        shadow = light.shadow
+        shadow = _light_shadow(light)
         # Tiny bias; large values detach shadows from casters (peter-panning).
         shadow.bias = settings.shadow_bias
         shadow.cull_mode = settings.shadow_cull
@@ -1022,7 +1065,7 @@ class ViewportController:
             near = max(0.25, distance - extent * 0.75)
             far = max(near + 1.0, distance + extent)
             camera.depth_range = (near, far)
-            if self._light_aim is not None:
+            if self._light_aim is not None and isinstance(light, gfx.DirectionalLight):
                 light.target = self._light_aim
         elif kind == "point":
             reach = self._shadow_reach(light)
@@ -1038,7 +1081,7 @@ class ViewportController:
                 near=0.25,
                 far=max(reach * 1.5, 8.0),
             )
-            if self._light_aim is not None:
+            if self._light_aim is not None and isinstance(light, gfx.SpotLight):
                 light.target = self._light_aim
 
     def refresh_shadows_for_transforms(self, names: Sequence[str]) -> None:
@@ -1081,7 +1124,7 @@ class ViewportController:
             divisions=int(settings.grid_divisions),
             color1=line,
             color2=line,
-            thickness=1.0,
+            thickness=1.0,  # pyright: ignore[reportArgumentType]
         )
         if settings.show_axes:
             self._tint_grid_axes(grid)
@@ -1097,7 +1140,10 @@ class ViewportController:
     @staticmethod
     def _tint_grid_axes(grid: gfx.GridHelper) -> None:
         """Color the grid's X (red) and Z (blue) center lines."""
-        colors = grid.geometry.colors
+        geometry = grid.geometry
+        if geometry is None:
+            return
+        colors = geometry.colors
         # GridHelper packs lines as (axis, line_index, endpoint, rgba) with
         # axis 0 = constant-x (along Z), axis 1 = constant-z (along X).
         n_lines = int(colors.nitems // 4)
@@ -1140,7 +1186,7 @@ class ViewportController:
             gfx.MeshBasicMaterial(
                 color=_OUTLINE_COLOR,
                 wireframe=True,
-                wireframe_thickness=self._settings.outline_thickness,
+                wireframe_thickness=self._settings.outline_thickness,  # pyright: ignore[reportArgumentType]
             ),
             cast_shadow=False,
             receive_shadow=False,
@@ -1155,7 +1201,7 @@ class ViewportController:
             gfx.MeshBasicMaterial(
                 color=_DRAW_WIRE_COLOR,
                 wireframe=True,
-                wireframe_thickness=1.0,
+                wireframe_thickness=1.0,  # pyright: ignore[reportArgumentType]
             ),
             cast_shadow=False,
             receive_shadow=False,
@@ -1201,33 +1247,33 @@ class ViewportController:
         if component.kind == "directional":
             light = gfx.DirectionalLight(
                 component.color,
-                intensity=component.intensity,
+                intensity=component.intensity,  # pyright: ignore[reportArgumentType]
                 cast_shadow=component.cast_shadow,
                 target=self._light_aim,
             )
-            helper = gfx.DirectionalLightHelper(ray_length=1.5)
+            helper = gfx.DirectionalLightHelper(ray_length=1.5)  # pyright: ignore[reportArgumentType]
         elif component.kind == "point":
             light = gfx.PointLight(
                 component.color,
-                intensity=component.intensity,
+                intensity=component.intensity,  # pyright: ignore[reportArgumentType]
                 cast_shadow=component.cast_shadow,
-                distance=component.distance,
-                decay=component.decay,
+                distance=component.distance,  # pyright: ignore[reportArgumentType]
+                decay=component.decay,  # pyright: ignore[reportArgumentType]
             )
-            helper = gfx.PointLightHelper(size=0.35, color=component.color)
-            helper.material.pick_write = True
+            helper = gfx.PointLightHelper(size=0.35, color=component.color)  # pyright: ignore[reportArgumentType]
+            _material_of(helper, gfx.Material).pick_write = True
         elif component.kind == "spot":
             light = gfx.SpotLight(
                 component.color,
-                intensity=component.intensity,
+                intensity=component.intensity,  # pyright: ignore[reportArgumentType]
                 cast_shadow=component.cast_shadow,
-                distance=component.distance,
-                decay=component.decay,
+                distance=component.distance,  # pyright: ignore[reportArgumentType]
+                decay=component.decay,  # pyright: ignore[reportArgumentType]
             )
             if self._light_aim is not None:
                 light.target = self._light_aim
             helper = gfx.SpotLightHelper()
-            helper.material.pick_write = True
+            _material_of(helper, gfx.Material).pick_write = True
         else:
             msg = f"unsupported light kind {component.kind!r}"
             raise ValueError(msg)
@@ -1269,7 +1315,8 @@ class ViewportController:
             outline.visible = show_outline and name in selected_meshes
         for name, bbox in self._bboxes.items():
             selected = name in selected_meshes
-            bbox.material.color = _BBOX_SELECTED_COLOR if selected else _BBOX_COLOR
+            material = _material_of(bbox, gfx.LineSegmentMaterial)
+            material.color = _BBOX_SELECTED_COLOR if selected else _BBOX_COLOR
 
     def _end_drag(self) -> None:
         self._drag_active = False
@@ -1324,17 +1371,21 @@ class ViewportController:
         self._manip_proxy.world.matrix = base
         return True
 
+    def _clear_gizmo(self) -> None:
+        # pygfx annotates ``object: WorldObject`` but checks for and accepts None.
+        self._gizmo.set_object(None)  # pyright: ignore[reportArgumentType]
+
     def _sync_gizmo_target(self) -> None:
         if self._drag_active:
             return
         if self._interaction_tool == "select" or not self._selected_order:
-            self._gizmo.set_object(None)
+            self._clear_gizmo()
             return
         if self._affect_pivot and len(self._selected_order) != 1:
-            self._gizmo.set_object(None)
+            self._clear_gizmo()
             return
         if not self._place_manip_proxy():
-            self._gizmo.set_object(None)
+            self._clear_gizmo()
             return
         self._gizmo.set_object(self._manip_proxy)
 
@@ -1433,7 +1484,10 @@ class ViewportController:
 
     def _on_pickable_click(self, event: gfx.PointerEvent) -> None:
         modifiers = event.modifiers or ()
-        target_name = event.target.name
+        target = event.target
+        if not isinstance(target, gfx.WorldObject):
+            return
+        target_name = target.name
         transform_name = self._resolve_transform(target_name)
         self._select_from_click(transform_name, modifiers)
         event.stop_propagation()

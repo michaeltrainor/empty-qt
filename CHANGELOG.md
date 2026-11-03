@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix the scene viewport's 63 pyright errors, and type-check
+  `apps/scene_viewport/src` in CI. Shadow depth pins move from private
+  attributes on pygfx shadows into the viewport, with regression tests. Calls
+  where pygfx's missing annotations make pyright infer `int` for float
+  parameters carry a rule-scoped `pyright: ignore`.
 - The `gate` job skips Dependabot PRs, which need no changelog or docs update.
 - Widen the Claude Code force-push deny rules to cover flags after the
   remote, `+refspec` pushes, and `--mirror`.

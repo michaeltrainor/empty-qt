@@ -41,9 +41,18 @@ class MayaTransformGizmo(gfx.TransformGizmo):
     ) -> None:
         self._tool: GizmoTool = "translate"
         self._on_changed = on_changed
-        super().__init__(object=object, screen_size=screen_size)
+        super().__init__(object=object, screen_size=screen_size)  # pyright: ignore[reportArgumentType]  # pygfx param is unannotated, inferred int
         self.toggle_mode("world")
         self._promote_overlay()
+
+    def _request_draw(self) -> None:
+        """Ask the viewport's renderer for a redraw, if one is attached."""
+        viewport = self._viewport
+        if viewport is None:
+            return
+        renderer = viewport.renderer
+        if isinstance(renderer, gfx.WgpuRenderer):
+            renderer.request_draw()
 
     def _promote_overlay(self) -> None:
         """Draw handles on top of scene meshes (no depth occlusion)."""
@@ -140,7 +149,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                 return
             self._ref = None
             ob = event.target
-            if ob not in self.children:
+            if not isinstance(ob, gfx.WorldObject) or ob not in self.children:
                 return
             if ob == self._center_sphere:
                 if self._tool != "scale":
@@ -161,7 +170,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
             else:
                 return
             self._highlight(ob)
-            self._viewport.renderer.request_draw()
+            self._request_draw()
             self.set_pointer_capture(event.pointer_id, event.root)
             event.stop_propagation()
             return
@@ -172,7 +181,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
             # Skip stock toggle_mode on center click — toolbar owns space.
             self._ref = None
             self._highlight()
-            self._viewport.renderer.request_draw()
+            self._request_draw()
             if self._on_changed is not None:
                 self._on_changed(True)
             event.stop_propagation()
@@ -195,5 +204,5 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                     self._handle_rotate_move(event)
                 if self._on_changed is not None:
                     self._on_changed(False)
-            self._viewport.renderer.request_draw()
+            self._request_draw()
             event.stop_propagation()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
 from PySide6.QtCore import Qt
@@ -52,7 +53,25 @@ from scene_viewport.viewport import (
 )
 from scene_viewport.world import SceneWorld
 
-_MESH_DEFAULTS: dict[PrimitiveKind, dict[str, object]] = {
+_Vec3 = tuple[float, float, float]
+
+
+class _MeshDefaults(TypedDict):
+    color: str
+    position: _Vec3
+    scale: NotRequired[_Vec3]
+    cast_shadow: NotRequired[bool]
+
+
+class _LightDefaults(TypedDict):
+    color: str
+    intensity: float
+    position: _Vec3
+    distance: NotRequired[float]
+    decay: NotRequired[float]
+
+
+_MESH_DEFAULTS: dict[PrimitiveKind, _MeshDefaults] = {
     "box": {"color": "#c47a3a", "position": (0.0, 0.5, 0.0)},
     "plane": {
         "color": "#5a6358",
@@ -64,7 +83,7 @@ _MESH_DEFAULTS: dict[PrimitiveKind, dict[str, object]] = {
     "sphere": {"color": "#4a8fd4", "position": (0.0, 0.5, 0.0)},
 }
 
-_LIGHT_DEFAULTS: dict[LightKind, dict[str, object]] = {
+_LIGHT_DEFAULTS: dict[LightKind, _LightDefaults] = {
     "directional": {
         "color": "#fff5e6",
         "intensity": 1.4,
@@ -269,9 +288,11 @@ class SceneViewportWindow(QMainWindow):
             action.setShortcut(QKeySequence(key))
             action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
             action.setToolTip(f"{label} ({key})")
-            action.triggered.connect(
-                lambda checked=False, current=mode: self._set_draw_mode(current)
-            )
+
+            def on_draw_mode(_checked: bool = False, current: DrawMode = mode) -> None:
+                self._set_draw_mode(current)
+
+            action.triggered.connect(on_draw_mode)
             shade_group.addAction(action)
             shading_menu.addAction(action)
             self._draw_mode_actions[mode] = action
@@ -320,9 +341,13 @@ class SceneViewportWindow(QMainWindow):
             action.setCheckable(True)
             action.setShortcut(QKeySequence(shortcut))
             action.setToolTip(f"{label} ({shortcut})")
-            action.triggered.connect(
-                lambda checked=False, current=tool: self._set_tool(current)
-            )
+
+            def on_tool(
+                _checked: bool = False, current: InteractionTool = tool
+            ) -> None:
+                self._set_tool(current)
+
+            action.triggered.connect(on_tool)
             tool_group.addAction(action)
             toolbar.addAction(action)
             self._tool_actions[tool] = action
@@ -332,13 +357,16 @@ class SceneViewportWindow(QMainWindow):
 
         space_group = QActionGroup(self)
         space_group.setExclusive(True)
-        for space, label in (("world", "World"), ("local", "Local")):
+        spaces: tuple[tuple[Space, str], ...] = (("world", "World"), ("local", "Local"))
+        for space, label in spaces:
             action = QAction(label, self)
             action.setCheckable(True)
             action.setToolTip(f"Edit in {label.lower()} space")
-            action.triggered.connect(
-                lambda checked=False, current=space: self._set_edit_space(current)
-            )
+
+            def on_space(_checked: bool = False, current: Space = space) -> None:
+                self._set_edit_space(current)
+
+            action.triggered.connect(on_space)
             space_group.addAction(action)
             toolbar.addAction(action)
             self._space_actions[space] = action
@@ -477,16 +505,16 @@ class SceneViewportWindow(QMainWindow):
             name=name,
             parent=self._selected_parent(),
             space=self._edit_space,
-            position=defaults.get("position", (0.0, 0.0, 0.0)),  # type: ignore[arg-type]
-            scale=defaults.get("scale", (1.0, 1.0, 1.0)),  # type: ignore[arg-type]
+            position=defaults["position"],
+            scale=defaults.get("scale", (1.0, 1.0, 1.0)),
         )
         mesh = MeshComponent(
             name=shape,
             transform=name,
             kind=kind,
-            color=str(defaults["color"]),
-            cast_shadow=bool(defaults.get("cast_shadow", True)),
-            receive_shadow=bool(defaults.get("receive_shadow", True)),
+            color=defaults["color"],
+            cast_shadow=defaults.get("cast_shadow", True),
+            receive_shadow=True,
         )
         self._register_transform(transform)
         self._register_mesh(mesh)
@@ -509,16 +537,16 @@ class SceneViewportWindow(QMainWindow):
             name=name,
             parent="",
             space=self._edit_space,
-            position=defaults.get("position", (0.0, 2.0, 0.0)),  # type: ignore[arg-type]
+            position=defaults["position"],
         )
         light = LightComponent(
             name=shape,
             transform=name,
             kind=kind,
-            color=str(defaults["color"]),
-            intensity=float(defaults.get("intensity", 1.4)),
-            distance=float(defaults.get("distance", 0.0)),
-            decay=float(defaults.get("decay", 2.0)),
+            color=defaults["color"],
+            intensity=defaults["intensity"],
+            distance=defaults.get("distance", 0.0),
+            decay=defaults.get("decay", 2.0),
             cast_shadow=True,
         )
         self._register_transform(transform)
