@@ -1,14 +1,21 @@
+# Every hook runs the tool version pinned in uv.lock, so Dependabot updates
+# reach pre-commit too. Requires `uv sync --all-packages`.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.3
-    hooks:
-      - id: ruff-check
-      - id: ruff-format
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --locked ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --locked ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
       - id: pyright
         name: pyright
-        entry: uv run pyright
+        entry: uv run --locked pyright
         language: system
         pass_filenames: false
         types: [python]

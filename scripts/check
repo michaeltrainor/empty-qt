@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run every check that CI's `check` job runs, in the same order.
+# CI, the /ship skill, and pr-reviewer all call this, so there is one list.
+# Usage: scripts/check
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+step() {
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::group::$1"
+  else
+    printf '\n== %s\n' "$1"
+  fi
+}
+end_step() {
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::endgroup::"; fi
+}
+
+run() {
+  local name=$1
+  shift
+  step "$name"
+  uv run --locked "$@"
+  end_step
+}
+
+run "Ruff" ruff check
+run "Ruff format" ruff format --check
+run "Pyright" pyright
+run "Pytest" pytest --cov-fail-under=80
+run "MkDocs" mkdocs build --strict
+printf '\nAll checks passed.\n'

@@ -34,22 +34,11 @@ jobs:
 
       - name: Sync
         # --all-packages adds the scene viewport app, so its tests run instead of skip.
-        run: uv sync --all-packages --extra dev --extra docs --frozen
+        run: uv sync --all-packages --locked
 
-      - name: Ruff
-        run: uv run ruff check
-
-      - name: Ruff format
-        run: uv run ruff format --check
-
-      - name: Pyright
-        run: uv run pyright
-
-      - name: Pytest
-        run: uv run pytest --cov-fail-under=80
-
-      - name: MkDocs
-        run: uv run mkdocs build --strict
+      # One list of checks for CI, agents, and contributors: see scripts/check.
+      - name: Check
+        run: scripts/check
 
   # A separate job: branch protection requires the job named "check", and a
   # matrix there would rename it and block every PR.
@@ -68,7 +57,7 @@ jobs:
           python-version: "3.13"
 
       - name: Sync
-        run: uv sync --all-packages --extra dev --frozen
+        run: uv sync --all-packages --locked --no-group docs
 
       - name: Pytest
-        run: uv run pytest
+        run: uv run --locked pytest

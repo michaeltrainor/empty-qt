@@ -34,7 +34,7 @@ jobs:
             libxcb-cursor0
 
       - name: Sync
-        run: uv sync --extra dev --frozen
+        run: uv sync --locked --no-group docs
 
       - name: Upgrade PySide6 past the pin
         run: uv pip install --upgrade pyside6

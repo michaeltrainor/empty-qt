@@ -33,14 +33,14 @@ uv run ruff format
 
 Ruff select is `E`, `F`, `I`, `UP`, `D`, `B`, `C4`, `SIM`, `RUF`, `PT`, and `T20`. `uv run pyright` (mode `standard`) also runs in CI.
 
-Run `uv sync --all-packages --extra dev --extra docs` to match CI. Without `--all-packages`, the scene viewport tests skip. Pyright checks `src` and `apps/scene_viewport/src`.
+Run `uv sync --all-packages` to match CI. `dev` and `docs` are default dependency groups, so they install without flags. Without `--all-packages`, the scene viewport tests skip. `scripts/check` runs every CI check in one command. Pyright checks `src` and `apps/scene_viewport/src`.
 
 ## Docs
 
 When a PR is marked ready for review, update the MkDocs pages under `docs/` for anything a user or contributor would notice (new widgets, examples, commands, or the PR process). `mkdocs.yml` sets `docstring_style: google`.
 
 ```bash
-uv sync --extra dev --extra docs
+uv sync --all-packages
 uv run mkdocs build --strict
 ```
 

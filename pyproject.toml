@@ -23,6 +23,11 @@ classifiers = [
 ]
 keywords = ["pyside6", "qt", "widgets", "models", "vfx"]
 
+[tool.uv]
+# dev and docs are dependency groups, so they never reach mtqt's published
+# metadata. A plain `uv sync` still installs both.
+default-groups = ["dev", "docs"]
+
 [tool.uv.workspace]
 members = ["apps/scene_viewport"]
 
@@ -30,7 +35,7 @@ members = ["apps/scene_viewport"]
 Homepage = "https://github.com/michaeltrainor/empty-qt"
 Repository = "https://github.com/michaeltrainor/empty-qt.git"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-qt>=4.4",
