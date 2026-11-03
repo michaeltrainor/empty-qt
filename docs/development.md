@@ -79,6 +79,10 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - ruff select `E`, `F`, `I`, `UP`, `D`, then `ruff format`. `uv run pyright` (mode `standard`) is a local check, not a CI job.
 - Do not add a node-type plugin loader, evaluator, or palette inside mtqt. Node catalogs belong in the host tool.
 
+## Claude Code
+
+This project is managed with Claude Code. `AGENTS.md` holds the project rules. `.claude/agents/pr-reviewer.md` is the review and merge agent, `.claude/skills/pyside6/` is the Qt safety skill, and `.claude/settings.json` sets shared permissions and a hook that runs `ruff format` on edited Python files. Put personal overrides in `.claude/settings.local.json`, which is gitignored.
+
 ## Pull requests
 
 Before a pull request is marked ready for review:

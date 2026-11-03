@@ -14,5 +14,7 @@ htmlcov/
 .cursor/
 .cursorignore
 .cursorindexingignore
+.claude/settings.local.json
+.claude/worktrees/
 .DS_Store
 .idea/

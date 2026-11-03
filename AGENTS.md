@@ -5,7 +5,7 @@ Reusable PySide6 widgets, item models, and QSS. Library code lives in `src/mtqt`
 ## PySide6
 
 Ownership, signal re-entrancy, deferred rebuilds, threading, and SIGSEGV
-triage: project skill `.cursor/skills/pyside6/` (read `SKILL.md` when
+triage: project skill `.claude/skills/pyside6/` (read `SKILL.md` when
 writing or debugging Qt/PySide6 code).
 
 ## Docstrings
