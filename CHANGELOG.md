@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Move project agent tooling to Claude Code: the `pr-reviewer` agent and the
+  PySide6 skill now live under `.claude/`, with shared permissions and a
+  `ruff format` hook in `.claude/settings.json`. Remove the Grok agent config.
 - Fix CI, which stopped at test collection without pygfx. CI now installs the
   `examples` group, and `tests/test_scene_textures.py` skips when pygfx is
   missing. The pr-reviewer agent now merges only after every CI check has

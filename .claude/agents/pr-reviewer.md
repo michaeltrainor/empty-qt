@@ -4,9 +4,7 @@ description: >
   Reviews a ready GitHub pull request for mtqt and squash-merges it when the
   review passes. Use when a PR is marked ready for review, or when asked to
   review and merge a pull request.
-prompt_mode: full
-permission_mode: default
-agents_md: true
+model: sonnet
 ---
 
 # PR reviewer
