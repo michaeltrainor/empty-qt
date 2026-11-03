@@ -6,7 +6,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from examples.scene_viewport.mesh.types import MeshBuffers
+from scene_viewport.mesh.types import MeshBuffers
 
 
 @njit(cache=True)

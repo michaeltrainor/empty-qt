@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("numpy")
 pytest.importorskip("pygfx")
 
-from examples.scene_viewport.env import average_horizon_color, make_studio_cubemap
+from scene_viewport.env import average_horizon_color, make_studio_cubemap
 
 
 def test_make_studio_cubemap_is_cube_texture() -> None:

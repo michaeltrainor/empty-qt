@@ -1,6 +1,6 @@
 # mtqt
 
-Reusable PySide6 widgets, item models, and QSS. Library code lives in `src/mtqt`.
+Reusable PySide6 widgets, item models, and QSS. Library code lives in `src/mtqt`. `apps/scene_viewport` is a separate, unpublished app in the same uv workspace.
 
 ## PySide6
 
@@ -33,7 +33,7 @@ uv run ruff format
 
 Ruff select is `E`, `F`, `I`, `UP`, `D`, `B`, `C4`, `SIM`, `RUF`, `PT`, and `T20`. `uv run pyright` (mode `standard`) also runs in CI.
 
-Run `uv sync --extra dev --extra docs --group examples` to match CI. Without that group, the scene viewport tests skip.
+Run `uv sync --all-packages --extra dev --extra docs` to match CI. Without `--all-packages`, the scene viewport tests skip. Pyright covers `src` only; the app has known type errors.
 
 ## Docs
 

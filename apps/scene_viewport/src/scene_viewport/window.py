@@ -18,39 +18,39 @@ from PySide6.QtWidgets import (
 )
 from rendercanvas.qt import QRenderWidget
 
-from examples.scene_viewport.components import (
-    LightComponent,
-    LightKind,
-    MeshComponent,
-    Space,
-    TransformComponent,
-)
-from examples.scene_viewport.gizmo import InteractionTool
-from examples.scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
-from examples.scene_viewport.mesh.types import PrimitiveKind
-from examples.scene_viewport.scene import (
-    FOLDER_NAMES,
-    build_forest,
-    light_components,
-    mesh_components,
-    transform_components,
-)
-from examples.scene_viewport.scene_io import SceneDocument, load_scene, save_scene
-from examples.scene_viewport.settings import AppSettings, load_settings, save_settings
-from examples.scene_viewport.settings_dialog import SettingsDialog
-from examples.scene_viewport.viewport import (
-    DRAW_MODE_HOTKEYS,
-    DrawMode,
-    ViewportController,
-    attach_viewport,
-)
-from examples.scene_viewport.world import SceneWorld
 from mtqt import (
     PropertiesBook,
     SceneGraphTree,
     apply_stylesheet,
     ensure_application,
 )
+from scene_viewport.components import (
+    LightComponent,
+    LightKind,
+    MeshComponent,
+    Space,
+    TransformComponent,
+)
+from scene_viewport.gizmo import InteractionTool
+from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
+from scene_viewport.mesh.types import PrimitiveKind
+from scene_viewport.scene import (
+    FOLDER_NAMES,
+    build_forest,
+    light_components,
+    mesh_components,
+    transform_components,
+)
+from scene_viewport.scene_io import SceneDocument, load_scene, save_scene
+from scene_viewport.settings import AppSettings, load_settings, save_settings
+from scene_viewport.settings_dialog import SettingsDialog
+from scene_viewport.viewport import (
+    DRAW_MODE_HOTKEYS,
+    DrawMode,
+    ViewportController,
+    attach_viewport,
+)
+from scene_viewport.world import SceneWorld
 
 _MESH_DEFAULTS: dict[PrimitiveKind, dict[str, object]] = {
     "box": {"color": "#c47a3a", "position": (0.0, 0.5, 0.0)},

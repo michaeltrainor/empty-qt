@@ -43,7 +43,7 @@ jobs:
             case "$f" in
               CHANGELOG.md) changelog=1 ;;
               docs/*) docs=1 ;;
-              src/*|examples/*|.github/*|pyproject.toml) needs_docs=1 ;;
+              src/*|examples/*|apps/*|.github/*|pyproject.toml) needs_docs=1 ;;
             esac
           done
 

@@ -33,8 +33,8 @@ jobs:
             libxcb-cursor0
 
       - name: Sync
-        # The examples group lets the scene viewport tests run instead of skip.
-        run: uv sync --extra dev --extra docs --group examples --frozen
+        # --all-packages adds the scene viewport app, so its tests run instead of skip.
+        run: uv sync --all-packages --extra dev --extra docs --frozen
 
       - name: Ruff
         run: uv run ruff check
@@ -68,7 +68,7 @@ jobs:
           python-version: "3.13"
 
       - name: Sync
-        run: uv sync --extra dev --group examples --frozen
+        run: uv sync --all-packages --extra dev --frozen
 
       - name: Pytest
         run: uv run pytest

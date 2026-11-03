@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pygfx as gfx
 
-from examples.scene_viewport.mesh.primitives import box, plane, uv_sphere
-from examples.scene_viewport.mesh.types import MeshBuffers, PrimitiveKind
+from scene_viewport.mesh.primitives import box, plane, uv_sphere
+from scene_viewport.mesh.types import MeshBuffers, PrimitiveKind
 
 
 def to_geometry(buffers: MeshBuffers) -> gfx.Geometry:

@@ -8,9 +8,10 @@ import pytest
 
 pytest.importorskip("pygfx")
 
-from examples.scene_viewport.mesh.primitives import box, plane, uv_sphere
-from examples.scene_viewport.textures import load_albedo_texture
 from PySide6.QtGui import QColor, QImage
+
+from scene_viewport.mesh.primitives import box, plane, uv_sphere
+from scene_viewport.textures import load_albedo_texture
 
 
 def test_load_albedo_texture_roundtrip(tmp_path: Path) -> None:

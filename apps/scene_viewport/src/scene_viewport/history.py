@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from examples.scene_viewport.components import (
+from scene_viewport.components import (
     LightComponent,
     MeshComponent,
     TransformComponent,

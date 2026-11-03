@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from examples.scene_viewport.components import (
+
+from scene_viewport.components import (
     LightComponent,
     MeshComponent,
     TransformComponent,
 )
-from examples.scene_viewport.world import SceneWorld
+from scene_viewport.world import SceneWorld
 
 
 def test_world_indexes_shapes_under_transform() -> None:

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from examples.scene_viewport.components import PrimitiveKind
+from scene_viewport.components import PrimitiveKind
 
 __all__ = ["MeshBuffers", "PrimitiveKind"]
 

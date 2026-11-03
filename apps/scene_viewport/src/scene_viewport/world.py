@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
-from examples.scene_viewport.components import (
+from scene_viewport.components import (
     LightComponent,
     MeshComponent,
     TransformComponent,
 )
-from examples.scene_viewport.scene import FOLDER_NAMES
-from examples.scene_viewport.scene_io import SceneDocument
+from scene_viewport.scene import FOLDER_NAMES
+from scene_viewport.scene_io import SceneDocument
 
 
 class SceneWorld:

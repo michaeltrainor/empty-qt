@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from examples.scene_viewport.components import (
+from scene_viewport.components import (
     LightComponent,
     MeshComponent,
     TransformComponent,
