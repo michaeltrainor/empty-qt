@@ -12,7 +12,7 @@ uv run mkdocs build
 uv build
 ```
 
-Install git hooks (after extras are synced):
+Install git hooks (after `uv sync --all-packages`):
 
 ```bash
 uv run pre-commit install
@@ -92,7 +92,7 @@ This project is managed with Claude Code.
 - `.claude/agents/pr-reviewer.md` reviews and squash-merges PRs. It runs on Sonnet in its own worktree and can't edit files.
 - `.claude/settings.json` sets shared permissions and three hooks:
   - SessionStart runs `uv sync --all-packages --locked`, and warns when `uv.lock` is stale.
-  - PreToolUse runs `.claude/hooks/guard-merge.sh`, which blocks `gh pr merge` everywhere except `pr-reviewer`. A deny rule can't do this, because deny rules also bind subagents. Your own terminal merges aren't affected.
+  - PreToolUse runs `.claude/hooks/guard_merge.py`, which blocks `gh pr merge` and the REST merge endpoint everywhere except `pr-reviewer`, including inside `bash -c` and `eval`. It tokenizes commands, so quoted text and heredocs that mention merging pass, and it blocks a merge command it can't parse. It's a guardrail, not a security boundary: a merge run from a script file isn't detected. It needs `python3`, and `tests/test_guard_merge.py` covers it. A deny rule can't do this job, because deny rules also bind subagents. Your own terminal merges aren't affected.
   - PostToolUse runs `ruff format` on edited Python files.
 
 Put personal overrides in `.claude/settings.local.json`, which is gitignored.

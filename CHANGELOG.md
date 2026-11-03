@@ -3,8 +3,10 @@
 ## Unreleased
 
 - Claude Code config:
-  - A PreToolUse hook blocks `gh pr merge` everywhere except the
-    `pr-reviewer` agent.
+  - A PreToolUse hook (`.claude/hooks/guard_merge.py`) blocks
+    `gh pr merge` and the REST merge endpoint everywhere except the
+    `pr-reviewer` agent. It tokenizes commands, so text that only mentions
+    merging passes, and blocks a merge command it can't parse.
   - A SessionStart hook keeps the environment synced with `uv.lock`.
   - `pr-reviewer` runs in its own worktree and can't edit files, and the
     instructions that used to be repeated in every handoff are now in the
