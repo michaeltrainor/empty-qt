@@ -95,7 +95,7 @@ Before a pull request is marked ready for review:
 
 When a pull request is ready for review (not a draft), the `pr-reviewer` agent reviews it and squash-merges it if the review passes and every CI check has finished and passed. A local run does not replace CI. Do not merge a ready PR in place of `pr-reviewer`.
 
-CI (`.github/workflows/ci.yml`) syncs with `--all-packages`, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without `--all-packages`, the scene viewport tests skip locally. Pyright covers `src` only, because the app has known type errors. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
+CI (`.github/workflows/ci.yml`) syncs with `--all-packages`, then runs `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`, `uv run pytest --cov-fail-under=80`, and `uv run mkdocs build --strict`. Without `--all-packages`, the scene viewport tests skip locally. Pyright checks both `src` and `apps/scene_viewport/src`. Its `platforms` job runs the tests on macOS and Windows. Branch protection requires the `check` job by name, so do not turn `check` into a matrix.
 
 `.github/workflows/qt-latest.yml` tests the newest PySide6 weekly as an early warning, and never blocks a PR. Dependabot opens weekly update PRs, and leaves Python and PySide6 alone because they follow the VFX Reference Platform.
 

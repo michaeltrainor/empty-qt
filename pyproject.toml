@@ -85,7 +85,7 @@ branch = true
 exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
 
 [tool.pyright]
-include = ["src"]
+include = ["src", "apps/scene_viewport/src"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
 venvPath = "."

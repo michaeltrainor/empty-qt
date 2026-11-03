@@ -33,7 +33,7 @@ uv run ruff format
 
 Ruff select is `E`, `F`, `I`, `UP`, `D`, `B`, `C4`, `SIM`, `RUF`, `PT`, and `T20`. `uv run pyright` (mode `standard`) also runs in CI.
 
-Run `uv sync --all-packages --extra dev --extra docs` to match CI. Without `--all-packages`, the scene viewport tests skip. Pyright covers `src` only; the app has known type errors.
+Run `uv sync --all-packages --extra dev --extra docs` to match CI. Without `--all-packages`, the scene viewport tests skip. Pyright checks `src` and `apps/scene_viewport/src`.
 
 ## Docs
 
