@@ -40,4 +40,4 @@ mtqt is MIT. PySide6 6.8 wheels from PyPI are typically LGPL; see Qt’s licensi
 
 ## Later
 
-Custom C++ widgets (Shiboken6 + scikit-build-core), DCC `wrapInstance` helpers, i18n, a theme engine, and hosted docs are out of scope for 0.1.0.
+Custom C++ widgets (Shiboken6 + scikit-build-core), DCC `wrapInstance` helpers, i18n, a theme engine, and hosted docs are out of scope for now.
