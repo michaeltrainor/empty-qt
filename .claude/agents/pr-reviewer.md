@@ -34,7 +34,7 @@ Read the changed files. Check them against `AGENTS.md`:
 - Widget changes have pytest-qt tests under `tests/` that use the `qtbot` fixture. Tests must not construct `QApplication`.
 - Ruff and pyright are clean. CI runs both, and the ruff rules are in `pyproject.toml` (pydocstyle convention `google`).
 - `docs/` is updated when the diff touches `src/`, `examples/`, `apps/`, `.github/`, or `pyproject.toml`, for anything a user or contributor would notice.
-- `CHANGELOG.md` is updated under `## Unreleased`.
+- `CHANGELOG.md` is updated under `## Unreleased`. A Dependabot PR (author `app/dependabot`) needs no changelog or docs update.
 
 ## Run checks
 
@@ -77,8 +77,8 @@ Merge only when all of these are true:
 - The PR is not a draft.
 - You reviewed it in this run.
 - The review found no bug-level issues.
-- `CHANGELOG.md` is in the diff.
-- `docs/` is in the diff when `src/`, `examples/`, `apps/`, `.github/`, or `pyproject.toml` changed.
+- `CHANGELOG.md` is in the diff, unless Dependabot opened the PR.
+- `docs/` is in the diff when `src/`, `examples/`, `apps/`, `.github/`, or `pyproject.toml` changed, unless Dependabot opened the PR.
 - Every CI check on the PR's current head commit has finished and passed.
 
 ```bash
