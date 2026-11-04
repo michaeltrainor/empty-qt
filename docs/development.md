@@ -55,7 +55,7 @@ Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewpo
 - **Hierarchy**: Edit → Parent to Last Selected (**P**) / Unparent (**Shift+P**) keep world pose.
 - **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, reparent, rename, and visibility.
 - **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; **F** frame; Ctrl+I isolate / Ctrl+Shift+I show all; `visible` on the Transform tab.
-- **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); optional albedo path; selection is outline-only; Preferences cover exposure, gamma, skybox/gradient, and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached). Point/spot shadows pin perspective near/far after pygfx's per-frame reset. No shared material library.
+- **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); optional albedo path; selection is outline-only; Preferences cover exposure, gamma (2.2 = standard sRGB), solid/gradient/skybox background (solid Maya gray `#5c5c5c` by default, unlit and separate from IBL), and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached). Point/spot shadows pin perspective near/far after pygfx's per-frame reset. No shared material library.
 - **Write-back**: Drag updates the local store; the properties book refreshes on pointer release.
 - **Not in scope yet**: snapping, screen space, custom HDRIs.
 

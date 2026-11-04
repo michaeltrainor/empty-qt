@@ -21,4 +21,4 @@ Composite widgets set `objectName` (`LabeledLineEdit`, `PathPicker`). QSS can us
 
 QSS does **not** restyle custom `paintEvent` drawing or most item-view delegates. Those need a painter or a delegate.
 
-v1 is not a theme engine: colors are literals in the `.qss` files.
+v1 is not a theme engine: colors are literals in the `.qss` files. The palette is neutral mid-gray, close to Maya's UI, and the token list is at the top of `base.qss`.

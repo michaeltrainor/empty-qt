@@ -182,6 +182,7 @@ class SceneViewportWindow(QMainWindow):
 
         self._props.set_editable_check(self._is_prop_editable)
         self._props.register_handler(self._on_prop_field)
+        self._props.fieldPreviewed.connect(self._on_prop_preview)
         self._install_menus()
         self._install_toolbar()
 
@@ -1115,6 +1116,32 @@ class SceneViewportWindow(QMainWindow):
             self._set_visibility({model.name: model.visible}, label="Visibility")
             return
 
+        updated = self._apply_panel_trs(model, stored)
+        if updated is None:
+            return
+        self._world.transforms[model.name] = updated
+        self._push_transform_edits(
+            "Edit Transform",
+            before,
+            {model.name: updated.model_copy(deep=True)},
+        )
+        self._props.set_pages(self._pages_for_transform(model.name))
+
+    def _apply_panel_trs(
+        self,
+        model: TransformComponent,
+        stored: TransformComponent,
+    ) -> TransformComponent | None:
+        """Push the panel's TRS to the viewport and return the local result.
+
+        Args:
+            model: Panel model; its TRS is local or world per ``model.space``.
+            stored: Current stored transform the result is based on.
+
+        Returns:
+            ``stored`` with the new local TRS, or ``None`` if the transform
+            is missing from the viewport. The store is not changed.
+        """
         if model.space == "local":
             updated = stored.model_copy(
                 update={
@@ -1125,30 +1152,51 @@ class SceneViewportWindow(QMainWindow):
                 }
             )
             self._viewport.apply_transform_local(updated)
-        else:
-            local = self._viewport.apply_transform_world(
-                model.name,
-                model.position,
-                model.rotation,
-                model.scale,
-            )
-            if local is None:
-                return
-            updated = stored.model_copy(
-                update={
-                    "space": "world",
-                    "position": local.position,
-                    "rotation": local.rotation,
-                    "scale": local.scale,
-                }
-            )
-        self._world.transforms[model.name] = updated
-        self._push_transform_edits(
-            "Edit Transform",
-            before,
-            {model.name: updated.model_copy(deep=True)},
+            return updated
+        local = self._viewport.apply_transform_world(
+            model.name,
+            model.position,
+            model.rotation,
+            model.scale,
         )
-        self._props.set_pages(self._pages_for_transform(model.name))
+        if local is None:
+            return None
+        return stored.model_copy(
+            update={
+                "space": "world",
+                "position": local.position,
+                "rotation": local.rotation,
+                "scale": local.scale,
+            }
+        )
+
+    def _on_prop_preview(
+        self,
+        field_name: str,
+        _value: object,
+        model: BaseModel,
+    ) -> None:
+        """Show a properties drag live in the viewport, without store or undo.
+
+        The drag's release arrives as a normal field commit through
+        :meth:`_on_prop_field`, which records one undo step against the
+        untouched store. Esc previews the start value to put it back.
+        """
+        if isinstance(model, MeshComponent):
+            self._viewport.apply_mesh(model)
+            return
+        if isinstance(model, LightComponent):
+            self._viewport.apply_light(model)
+            return
+        if not isinstance(model, TransformComponent):
+            return
+        stored = self._world.transforms.get(model.name)
+        if stored is None:
+            return
+        if field_name == "pivot":
+            self._viewport.set_pivot(model.name, model.pivot)
+        elif field_name in {"position", "rotation", "scale"}:
+            self._apply_panel_trs(model, stored)
 
     def _names_for_viewport(self, names: list[str]) -> list[str]:
         """Map tree selection to transform UIDs for the viewport."""

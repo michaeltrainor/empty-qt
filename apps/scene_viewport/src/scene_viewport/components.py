@@ -45,7 +45,8 @@ class TransformComponent(BaseModel):
     rotation: tuple[float, float, float] = Field(
         default=(0.0, 0.0, 0.0),
         title="Rotation",
-        description="Euler XYZ rotation in radians.",
+        description="Euler XYZ rotation. Stored in radians, shown in degrees.",
+        json_schema_extra={"mtqt_display": "degrees"},
     )
     scale: tuple[float, float, float] = Field(
         default=(1.0, 1.0, 1.0),

@@ -26,6 +26,7 @@ class PropertiesBook(QWidget):
 
     modelChanged = Signal(object)
     fieldChanged = Signal(str, object, object)
+    fieldPreviewed = Signal(str, object, object)
     validationFailed = Signal(str, str)
 
     def __init__(
@@ -200,6 +201,7 @@ class PropertiesBook(QWidget):
                     panel.register_field_handler(field_name, handler)
             panel.modelChanged.connect(self.modelChanged.emit)
             panel.fieldChanged.connect(self.fieldChanged.emit)
+            panel.fieldPreviewed.connect(self.fieldPreviewed.emit)
             panel.validationFailed.connect(self.validationFailed.emit)
             panel.set_model(model)
             self._panels.append(panel)

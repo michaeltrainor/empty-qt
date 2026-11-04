@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- `PropertiesPanel` adds three ways to edit numbers:
+  - Drag a numeric row's label, or a vector's X/Y/Z label, to change the
+    value. Ctrl gives fine steps, Shift gives coarse ones, and Esc cancels.
+  - `int` and `float` fields with both bounds get a slider.
+    `mtqt_slider: False` turns it off, and `mtqt_soft_range` sets a slider
+    range that typed values can go past.
+  - `mtqt_display: "degrees"` or `"percent"` and `mtqt_suffix` show values
+    in friendlier units while the model keeps its own.
+- New `fieldPreviewed` signal on `PropertiesPanel` and `PropertiesBook`.
+  Drags and slider moves preview each step and emit `fieldChanged` once on
+  release.
+- Scene viewport: rotation is shown in degrees (still stored in radians).
+  Dragging a property updates the viewport live and records one undo step
+  on release.
+- `PropertiesPanel` and `PropertiesBook` use a compact layout, about as
+  dense as the attribute editors in Maya and Blender: 12px text, 22px
+  fields, 3px between rows, right-aligned labels that are vertically
+  centered, and tighter tabs. Vector X/Y/Z spin boxes no longer show
+  arrow buttons, and they share the row width, so all three fit in a
+  narrow panel. The styles are scoped to `#PropertiesBook` and
+  `#PropertiesPanel`, and the rest of the app chrome keeps its sizes.
+- Lighten the `base` and `widgets` stylesheets from near-black blue-grays
+  to neutral mid-grays in the style of Maya (panels `#3c3c3c`, inputs and
+  bars `#2f2f2f`, borders `#565656`, muted text `#b0b0b0`). The scene
+  viewport canvas placeholder matches the 3D background. The node graph
+  keeps its own painted colors.
+- Scene viewport: the background now defaults to Maya's flat 0.36 gray
+  (`#5c5c5c`). It is unlit and no longer tied to the IBL colors. A new
+  `solid` background mode and Background Color setting are added, and
+  settings files saved before this change switch to `solid` once.
+- Scene viewport: the Gamma setting no longer darkens the whole image.
+  pygfx already outputs sRGB, so a display gamma of 2.2 now means no extra
+  correction.
+- Scene viewport: grid lines are darker so they read on the gray
+  background. The grid stays unlit and never casts or receives shadows.
 - Claude Code config:
   - A PreToolUse hook (`.claude/hooks/guard_merge.py`) blocks
     `gh pr merge` and the REST merge endpoint everywhere except the

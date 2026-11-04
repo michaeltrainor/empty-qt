@@ -9,11 +9,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Space = Literal["local", "world"]
-BackgroundMode = Literal["gradient", "skybox"]
+BackgroundMode = Literal["solid", "gradient", "skybox"]
 ShadowCull = Literal["front", "back", "none"]
 
 _SETTINGS_DIR = Path.home() / ".config" / "mtqt"
 SETTINGS_PATH = _SETTINGS_DIR / "scene_viewport.json"
+
+#: Maya's default viewport background (0.36 gray, gradient off).
+MAYA_BACKGROUND = "#5c5c5c"
+#: pygfx already writes sRGB, so this display gamma means "no extra correction".
+SRGB_GAMMA = 2.2
 
 
 class AppSettings(BaseModel):
@@ -73,11 +78,21 @@ class AppSettings(BaseModel):
         ge=1.0,
         le=2.4,
         title="Gamma",
-        description="Display gamma applied by the renderer.",
+        description="Display gamma. 2.2 is standard sRGB; lower brightens.",
     )
     background_mode: BackgroundMode = Field(
-        default="skybox",
+        default="solid",
         title="Background Mode",
+        description=(
+            "Solid uses Background Color. Gradient and skybox use the "
+            "environment sky and ground colors."
+        ),
+    )
+    background_color: str = Field(
+        default=MAYA_BACKGROUND,
+        title="Background Color",
+        description="Flat viewport color. Not lit and not used for IBL.",
+        json_schema_extra={"mtqt_editor": "color"},
     )
     background_top: str = Field(
         default="#6b7c95",
@@ -135,7 +150,10 @@ def load_settings(path: Path | None = None) -> AppSettings:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
         settings = AppSettings.model_validate(payload)
-        migrated = _migrate_shadow_defaults(settings, payload)
+        migrated = _migrate_background_defaults(
+            _migrate_shadow_defaults(settings, payload),
+            payload,
+        )
         if migrated != settings:
             # Persist the rewrite so Preferences shows the fixed defaults.
             save_settings(migrated, target)
@@ -158,6 +176,36 @@ def _migrate_shadow_defaults(
     if not updates:
         return settings
     return settings.model_copy(update=updates)
+
+
+def _migrate_background_defaults(
+    settings: AppSettings,
+    payload: dict[str, object],
+) -> AppSettings:
+    """Move files saved before the solid background existed onto it.
+
+    Older files always stored ``background_mode`` as gradient or skybox,
+    because solid wasn't an option, so they open on the Maya gray once.
+    """
+    if "background_color" in payload:
+        return settings
+    return settings.model_copy(update={"background_mode": "solid"})
+
+
+def renderer_gamma(gamma: float) -> float:
+    """Convert a display gamma to pygfx's ``gamma_correction`` exponent.
+
+    pygfx renders to an sRGB target and then raises each output channel
+    to ``gamma_correction``, so ``1.0`` is already correct sRGB. Passing a
+    display gamma of 2.2 straight through squares the image darker.
+
+    Args:
+        gamma: Display gamma from settings (2.2 is standard sRGB).
+
+    Returns:
+        The exponent for ``WgpuRenderer.gamma_correction``.
+    """
+    return gamma / SRGB_GAMMA
 
 
 def save_settings(settings: AppSettings, path: Path | None = None) -> Path:
