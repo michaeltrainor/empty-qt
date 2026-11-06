@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `SceneGraphTree` keeps its navigation keys (arrows, Home, End, Page
+  Up/Down, alone or with Shift) while it has focus, even when the host
+  window binds them as shortcuts. In the scene viewport, Home moves to the
+  first row in the tree instead of framing the view; A still frames all.
+- Scene viewport: local-space move snapping stays on the dragged axis for
+  objects under a non-uniformly scaled parent, and no longer breaks on a
+  zero-scale axis.
 - Scene viewport fixes:
   - The box-select outline stays visible over meshes in the top, front,
     and side views.

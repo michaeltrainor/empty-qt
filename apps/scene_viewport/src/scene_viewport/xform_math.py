@@ -113,8 +113,15 @@ def snap_translation(
         return out
     delta = out[:3, 3] - start[:3, 3]
     if local_axes:
-        frame = start[:3, :3] / np.linalg.norm(start[:3, :3], axis=0)
-        delta = frame @ (np.round((frame.T @ delta) / step) * step)
+        # The gizmo's local axes are these columns. Under shear (a rotated
+        # child of a non-uniformly scaled parent) they aren't orthogonal, so
+        # solve for the step counts instead of projecting onto each axis.
+        # A zero-scale axis has no direction; pinv gives it zero steps.
+        linear = start[:3, :3]
+        norms = np.linalg.norm(linear, axis=0)
+        frame = linear / np.where(norms > 1e-12, norms, 1.0)
+        steps = np.linalg.pinv(frame) @ delta
+        delta = frame @ (np.round(steps / step) * step)
     else:
         delta = np.round(delta / step) * step
     out[:3, 3] = start[:3, 3] + delta
