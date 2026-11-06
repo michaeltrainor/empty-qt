@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QKeyCombination, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -35,6 +36,7 @@ from scene_viewport.components import (
 from scene_viewport.gizmo import InteractionTool
 from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
 from scene_viewport.mesh.types import PrimitiveKind
+from scene_viewport.navigation import NAVIGATION_HINTS
 from scene_viewport.scene import (
     FOLDER_NAMES,
     build_forest,
@@ -49,6 +51,7 @@ from scene_viewport.viewport import (
     DRAW_MODE_HOTKEYS,
     DrawMode,
     ViewportController,
+    ViewPreset,
     attach_viewport,
 )
 from scene_viewport.world import SceneWorld
@@ -116,8 +119,12 @@ class SceneViewportWindow(QMainWindow):
     **E** rotate, **R** scale; World/Local on the toolbar; **D** edit pivot.
     Shading **1**-**6** (bbox / wire+shaded / flat / wire / shaded / textured).
     **P** parent to last selected, **Shift+P** unparent. Ctrl+D duplicate,
-    rename, **F** frame, Ctrl+I isolate. File menu saves/loads the scene.
-    Ctrl+Z / Ctrl+Y undo and redo.
+    rename, **F** frame selected, **A** frame all, Ctrl+I isolate, Ctrl+H
+    hide. Numpad **7** / **1** / **3** / **5** switch to top / front / side /
+    perspective. **X** toggles snapping (hold Ctrl mid-drag to invert).
+    Camera bindings follow the Maya, Blender, or pygfx preset in
+    Preferences. File menu saves/loads the scene. Ctrl+Z / Ctrl+Y undo and
+    redo.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -134,6 +141,8 @@ class SceneViewportWindow(QMainWindow):
         self._space_actions: dict[Space, QAction] = {}
         self._draw_mode_actions: dict[str, QAction] = {}
         self._pivot_action: QAction | None = None
+        self._grid_action: QAction | None = None
+        self._nav_label: QLabel | None = None
         self._scene_path: Path | None = None
         self._visibility_backup: dict[str, bool] | None = None
 
@@ -185,6 +194,7 @@ class SceneViewportWindow(QMainWindow):
         self._props.fieldPreviewed.connect(self._on_prop_preview)
         self._install_menus()
         self._install_toolbar()
+        self._install_status_bar()
 
     def _install_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -233,6 +243,19 @@ class SceneViewportWindow(QMainWindow):
         edit_menu.addAction(redo_action)
         edit_menu.addSeparator()
 
+        select_all_action = QAction("Select All", self)
+        select_all_action.setShortcut(QKeySequence.StandardKey.SelectAll)
+        select_all_action.triggered.connect(self._select_all)
+        edit_menu.addAction(select_all_action)
+
+        deselect_action = QAction("Deselect All", self)
+        # Blender's Alt+A. Not Esc: a window Esc shortcut would steal the
+        # key from PropertiesPanel, where Esc cancels a label scrub.
+        deselect_action.setShortcut(QKeySequence("Alt+A"))
+        deselect_action.triggered.connect(lambda: self._select_names([]))
+        edit_menu.addAction(deselect_action)
+        edit_menu.addSeparator()
+
         duplicate_action = QAction("Duplicate", self)
         duplicate_action.setShortcut(QKeySequence("Ctrl+D"))
         duplicate_action.triggered.connect(self._duplicate_selection)
@@ -255,20 +278,22 @@ class SceneViewportWindow(QMainWindow):
         edit_menu.addAction(unparent_action)
         edit_menu.addSeparator()
 
+        hide_action = QAction("Hide Selection", self)
+        hide_action.setShortcut(QKeySequence("Ctrl+H"))
+        hide_action.triggered.connect(self._hide_selection)
+        edit_menu.addAction(hide_action)
+
         isolate_action = QAction("Isolate Selection", self)
         isolate_action.setShortcut(QKeySequence("Ctrl+I"))
         isolate_action.triggered.connect(self._isolate_selection)
         edit_menu.addAction(isolate_action)
 
         show_all_action = QAction("Show All", self)
-        show_all_action.setShortcut(QKeySequence("Ctrl+Shift+I"))
+        show_all_action.setShortcuts(
+            [QKeySequence("Ctrl+Shift+I"), QKeySequence("Ctrl+Shift+H")]
+        )
         show_all_action.triggered.connect(self._show_all)
         edit_menu.addAction(show_all_action)
-
-        frame_action = QAction("Frame Selection", self)
-        frame_action.setShortcut(QKeySequence("F"))
-        frame_action.triggered.connect(self._frame_selection)
-        edit_menu.addAction(frame_action)
         edit_menu.addSeparator()
 
         delete_action = QAction("Delete", self)
@@ -279,6 +304,45 @@ class SceneViewportWindow(QMainWindow):
         # Backspace as a Maya-style alias on macOS (Delete is often Fn-Backspace).
         backspace = QShortcut(QKeySequence(Qt.Key.Key_Backspace), self)
         backspace.activated.connect(self._delete_selection)
+
+        view_menu = self.menuBar().addMenu("&View")
+        frame_action = QAction("Frame Selection", self)
+        frame_action.setShortcut(QKeySequence("F"))
+        frame_action.triggered.connect(self._frame_selection)
+        view_menu.addAction(frame_action)
+
+        frame_all_action = QAction("Frame All", self)
+        frame_all_action.setShortcuts([QKeySequence("A"), QKeySequence("Home")])
+        frame_all_action.triggered.connect(lambda: self._viewport.frame_selection([]))
+        view_menu.addAction(frame_all_action)
+        view_menu.addSeparator()
+
+        # Blender numpad layout; menu entries cover keyboards without one.
+        view_specs: list[tuple[ViewPreset, str, Qt.Key]] = [
+            ("perspective", "Perspective", Qt.Key.Key_5),
+            ("top", "Top", Qt.Key.Key_7),
+            ("front", "Front", Qt.Key.Key_1),
+            ("side", "Side", Qt.Key.Key_3),
+        ]
+        for view, label, key in view_specs:
+            action = QAction(label, self)
+            action.setShortcut(
+                QKeySequence(QKeyCombination(Qt.KeyboardModifier.KeypadModifier, key))
+            )
+
+            def on_view(_checked: bool = False, current: ViewPreset = view) -> None:
+                self._viewport.set_view(current)
+
+            action.triggered.connect(on_view)
+            view_menu.addAction(action)
+        view_menu.addSeparator()
+
+        grid_action = QAction("Show Grid", self)
+        grid_action.setCheckable(True)
+        grid_action.setChecked(self._settings.show_grid)
+        grid_action.toggled.connect(self._set_show_grid)
+        view_menu.addAction(grid_action)
+        self._grid_action = grid_action
 
         shading_menu = self.menuBar().addMenu("S&hading")
         shade_group = QActionGroup(self)
@@ -321,6 +385,19 @@ class SceneViewportWindow(QMainWindow):
         save_settings(self._settings)
         self._viewport.apply_settings(self._settings)
         self._set_edit_space(self._settings.default_edit_space)
+        if self._grid_action is not None:
+            self._grid_action.blockSignals(True)
+            self._grid_action.setChecked(self._settings.show_grid)
+            self._grid_action.blockSignals(False)
+        self._update_status()
+
+    def _set_show_grid(self, visible: bool) -> None:
+        """Toggle the ground grid and persist it like Preferences does."""
+        if visible == self._settings.show_grid:
+            return
+        self._settings = self._settings.model_copy(update={"show_grid": visible})
+        save_settings(self._settings)
+        self._viewport.apply_settings(self._settings)
 
     def _install_toolbar(self) -> None:
         toolbar = QToolBar("Tools", self)
@@ -382,11 +459,48 @@ class SceneViewportWindow(QMainWindow):
         toolbar.addAction(pivot_action)
         self._pivot_action = pivot_action
 
+        snap_action = QAction("Snap", self)
+        snap_action.setCheckable(True)
+        snap_action.setShortcut(QKeySequence("X"))
+        snap_action.setToolTip(
+            "Snap move/rotate to the Preferences increments (X). "
+            "Hold Ctrl during a drag to invert."
+        )
+        snap_action.toggled.connect(self._set_snap)
+        toolbar.addAction(snap_action)
+
+    def _install_status_bar(self) -> None:
+        status = self.statusBar()
+        self._nav_label = QLabel(status)
+        status.addPermanentWidget(self._nav_label)
+        self._update_status()
+
+    def _update_status(self) -> None:
+        """Show selection, tool, snap state, and the camera bindings."""
+        if self._nav_label is not None:
+            self._nav_label.setText(NAVIGATION_HINTS[self._settings.navigation_style])
+        names = self._viewport.selected_names
+        if not names:
+            selection = "Nothing selected"
+        elif len(names) == 1:
+            selection = names[0]
+        else:
+            selection = f"{len(names)} selected (primary {names[-1]})"
+        parts = [selection, self._viewport.interaction_tool.capitalize()]
+        if self._viewport.snap_enabled:
+            parts.append("Snap on")
+        self.statusBar().showMessage(" · ".join(parts))
+
+    def _set_snap(self, enabled: bool) -> None:
+        self._viewport.set_snap_enabled(enabled)
+        self._update_status()
+
     def _set_tool(self, tool: InteractionTool) -> None:
         action = self._tool_actions.get(tool)
         if action is not None and not action.isChecked():
             action.setChecked(True)
         self._viewport.set_interaction_tool(tool)
+        self._update_status()
 
     def _set_affect_pivot(self, enabled: bool) -> None:
         self._viewport.set_affect_pivot(enabled)
@@ -929,6 +1043,25 @@ class SceneViewportWindow(QMainWindow):
         if len(selected) == 1 and selected[0] in after:
             self._props.set_pages(self._pages_for_transform(selected[0]))
 
+    def _hide_selection(self) -> None:
+        roots = self._selection_roots()
+        if roots:
+            self._set_visibility(dict.fromkeys(roots, False), label="Hide")
+
+    def _select_all(self) -> None:
+        names = [name for name in self._world.transforms if name not in FOLDER_NAMES]
+        self._select_names(names)
+
+    def _select_names(self, names: list[str]) -> None:
+        """Select transforms in both the tree and viewport."""
+        self._syncing = True
+        try:
+            self._tree.set_selected_names(names)
+            self._viewport.set_selected_names(names)
+        finally:
+            self._syncing = False
+        self._sync_properties(names)
+
     def _isolate_selection(self) -> None:
         selected = set(self._selection_roots())
         if not selected:
@@ -1210,6 +1343,7 @@ class SceneViewportWindow(QMainWindow):
         return result
 
     def _sync_properties(self, names: list[str]) -> None:
+        self._update_status()
         transforms = self._names_for_viewport(names)
         if len(transforms) != 1:
             self._props.clear()

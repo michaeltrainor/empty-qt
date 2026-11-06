@@ -54,10 +54,13 @@ Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewpo
 - **Pivot**: each transform stores a local `pivot`; the gizmo sits on a proxy at that offset (average of selection for multi-select; orientation from the last selected). Edit Pivot moves the offset without moving geometry.
 - **Hierarchy**: Edit → Parent to Last Selected (**P**) / Unparent (**Shift+P**) keep world pose.
 - **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, reparent, rename, and visibility.
-- **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; **F** frame; Ctrl+I isolate / Ctrl+Shift+I show all; `visible` on the Transform tab.
+- **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; Ctrl+A select all, Alt+A deselect; Ctrl+H hide, Ctrl+I isolate, Ctrl+Shift+I or Ctrl+Shift+H show all; `visible` on the Transform tab.
+- **Camera**: Preferences → Navigation picks Maya (Alt+LMB tumble, Alt+MMB track, Alt+RMB dolly; the default), Blender (MMB orbit, Shift+MMB pan, Ctrl+MMB zoom), or stock pygfx bindings. The status bar shows the active bindings. View → **F** frame selection, **A** / Home frame all, numpad **7** / **1** / **3** orthographic top / front / side, numpad **5** perspective.
+- **Selection**: Maya click modifiers. Shift toggles, Ctrl removes, Ctrl+Shift adds. Alt+click never changes the selection.
+- **Snapping**: toolbar Snap (**X**) rounds move and rotate drags to the Preferences steps (0.5 units and 15° by default). Hold Ctrl during a drag to invert it. Local-space moves snap along the local axes.
 - **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); optional albedo path; selection is outline-only; Preferences cover exposure, gamma (2.2 = standard sRGB), solid/gradient/skybox background (solid Maya gray `#5c5c5c` by default, unlit and separate from IBL), and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached). Point/spot shadows pin perspective near/far after pygfx's per-frame reset. No shared material library.
 - **Write-back**: Drag updates the local store; the properties book refreshes on pointer release.
-- **Not in scope yet**: snapping, screen space, custom HDRIs.
+- **Not in scope yet**: marquee selection, scale snapping, screen space, custom HDRIs.
 
 Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.json`, debugpy, integrated terminal):
 

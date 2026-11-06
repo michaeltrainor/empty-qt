@@ -25,6 +25,7 @@ from scene_viewport.gizmo import (
     MayaTransformGizmo,
 )
 from scene_viewport.mesh.geometry import geometry_for
+from scene_viewport.navigation import navigation_controls
 from scene_viewport.settings import AppSettings, renderer_gamma
 from scene_viewport.textures import load_albedo_texture
 from scene_viewport.xform_math import (
@@ -32,6 +33,8 @@ from scene_viewport.xform_math import (
     average_positions,
     local_pivot_from_world_point,
     pivot_world_matrix,
+    snap_rotation,
+    snap_translation,
     translate_mat,
 )
 
@@ -39,7 +42,7 @@ _OUTLINE_COLOR = "#5eb0ff"
 _DRAW_WIRE_COLOR = "#1c1c1c"
 _BBOX_COLOR = "#c8c8c8"
 _BBOX_SELECTED_COLOR = "#5eb0ff"
-_ADDITIVE_MODIFIERS = frozenset({"Shift", "Control", "Meta"})
+_PERSPECTIVE_FOV = 50.0
 
 Vec3 = tuple[float, float, float]
 
@@ -84,6 +87,15 @@ DrawMode = Literal[
     "textured",
 ]
 _LIT_DRAW_MODES = frozenset({"shaded", "textured", "wire_shaded"})
+ViewPreset = Literal["perspective", "top", "front", "side"]
+# Look direction per preset. Top tilts a hair off vertical so the orbit
+# controller's +Y reference up never becomes degenerate.
+_VIEW_DIRECTIONS: dict[ViewPreset, Vec3] = {
+    "perspective": (-5.5, -4.0, -6.5),
+    "top": (0.0, -1.0, -1e-4),
+    "front": (0.0, 0.0, -1.0),
+    "side": (-1.0, 0.0, 0.0),
+}
 DRAW_MODE_HOTKEYS: tuple[tuple[str, DrawMode, str], ...] = (
     ("1", "bounding_box", "Bounding Box"),
     ("2", "wire_shaded", "Wireframe on Shaded"),
@@ -141,6 +153,9 @@ class ViewportController:
         self._affect_pivot = False
         self._drag_active = False
         self._drag_rels: dict[str, np.ndarray] = {}
+        # Proxy world matrix when the gizmo was last placed (drag start).
+        self._proxy_rest: np.ndarray | None = None
+        self._snap_enabled = False
         self._settings = AppSettings()
         self._background: gfx.Background | None = None
         self._ambient: gfx.AmbientLight | None = None
@@ -205,11 +220,17 @@ class ViewportController:
         for component in lights:
             self._add_light(component)
 
-        self.camera = gfx.PerspectiveCamera(50, 16 / 9)  # pyright: ignore[reportArgumentType]
+        self.camera = gfx.PerspectiveCamera(_PERSPECTIVE_FOV, 16 / 9)  # pyright: ignore[reportArgumentType]
         self.camera.local.position = (5.5, 4.0, 6.5)
         self.camera.depth_range = (0.05, 500.0)
         self.camera.show_pos((0.0, 0.4, 0.0))
-        gfx.OrbitController(self.camera, register_events=self.renderer)
+        self._camera_controller = gfx.OrbitController(
+            self.camera,
+            register_events=self.renderer,
+        )
+        self._camera_controller.controls = navigation_controls(
+            self._settings.navigation_style
+        )
 
         self._gizmo = MayaTransformGizmo(
             screen_size=self._settings.gizmo_size,
@@ -230,6 +251,9 @@ class ViewportController:
         """
         self._settings = settings.model_copy(deep=True)
         self.renderer.gamma_correction = renderer_gamma(settings.gamma)
+        self._camera_controller.controls = navigation_controls(
+            settings.navigation_style
+        )
         self._rebuild_environment()
         if self._ambient is not None:
             self._ambient.intensity = self._effective_ambient()
@@ -464,6 +488,22 @@ class ViewportController:
         self._sync_gizmo_target()
         self._canvas.request_draw()
 
+    @property
+    def snap_enabled(self) -> bool:
+        """Whether move/rotate drags snap to the settings increments."""
+        return self._snap_enabled
+
+    def set_snap_enabled(self, enabled: bool) -> None:
+        """Toggle increment snapping for gizmo drags.
+
+        Holding Ctrl during a drag inverts this for that drag.
+
+        Args:
+            enabled: When true, translate snaps to ``snap_translate`` and
+                rotate to ``snap_rotate_degrees``.
+        """
+        self._snap_enabled = bool(enabled)
+
     def set_selected_names(self, names: Sequence[str]) -> None:
         """Replace the viewport selection and refresh highlights.
 
@@ -665,13 +705,11 @@ class ViewportController:
             self._sync_gizmo_target()
         self._canvas.request_draw()
 
-    def frame_selection(self, names: Sequence[str] | None = None) -> None:
-        """Frame the camera on ``names``, or the whole scene when empty.
-
-        Args:
-            names: Transform UIDs to frame. ``None`` uses the current
-                selection; an empty selection frames every transform.
-        """
+    def _bounding_sphere(
+        self,
+        names: Sequence[str] | None,
+    ) -> tuple[float, float, float, float] | None:
+        """World bounding sphere around ``names`` (selection, else everything)."""
         targets = list(names) if names is not None else list(self._selected_order)
         if not targets:
             targets = list(self._groups)
@@ -684,37 +722,60 @@ class ViewportController:
             if box is not None:
                 boxes.append(np.asarray(box, dtype=np.float64))
                 continue
-            pos = as_vec3(group.world.position)
-            boxes.append(
-                np.array(
-                    [
-                        [pos[0] - 0.5, pos[1] - 0.5, pos[2] - 0.5],
-                        [pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5],
-                    ],
-                    dtype=np.float64,
-                )
-            )
+            pos = np.asarray(group.world.position, dtype=np.float64)
+            boxes.append(np.array([pos - 0.5, pos + 0.5], dtype=np.float64))
         if not boxes:
-            return
+            return None
         mins = np.min([box[0] for box in boxes], axis=0)
         maxs = np.max([box[1] for box in boxes], axis=0)
         center = (mins + maxs) * 0.5
-        extent = np.maximum(maxs - mins, 0.25)
-        size = float(np.linalg.norm(extent))
-        proxy = gfx.Mesh(
-            gfx.box_geometry(
-                float(extent[0]),  # pyright: ignore[reportArgumentType]
-                float(extent[1]),  # pyright: ignore[reportArgumentType]
-                float(extent[2]),  # pyright: ignore[reportArgumentType]
-            ),
-            gfx.MeshBasicMaterial(opacity=0.0),
-        )
-        proxy.local.position = (float(center[0]), float(center[1]), float(center[2]))
-        self.camera.show_object(proxy, scale=1.35)  # pyright: ignore[reportArgumentType]
+        radius = float(np.linalg.norm(np.maximum(maxs - mins, 0.25))) * 0.5
+        return (float(center[0]), float(center[1]), float(center[2]), radius)
+
+    def _show_sphere(
+        self,
+        sphere: tuple[float, float, float, float],
+        view_dir: Vec3 | None = None,
+    ) -> None:
+        # pygfx annotates ``target: WorldObject`` but also accepts an
+        # (x, y, z, radius) sphere, and ``scale`` is inferred as int.
+        self.camera.show_object(sphere, view_dir, scale=1.35)  # pyright: ignore[reportArgumentType]
+        size = sphere[3] * 2.0
         near = max(0.05, size * 0.02)
         far = max(near * 200.0, size * 40.0, 50.0)
         self.camera.depth_range = (near, min(far, 5000.0))
         self._canvas.request_draw()
+
+    def frame_selection(self, names: Sequence[str] | None = None) -> None:
+        """Frame the camera on ``names``, or the whole scene when empty.
+
+        Args:
+            names: Transform UIDs to frame. ``None`` uses the current
+                selection; an empty selection frames every transform.
+        """
+        sphere = self._bounding_sphere(names)
+        if sphere is not None:
+            self._show_sphere(sphere)
+
+    def set_view(self, view: ViewPreset) -> None:
+        """Snap the camera to a Maya/Blender-style preset view.
+
+        ``top``, ``front``, and ``side`` switch to an orthographic projection
+        and frame the whole scene. ``perspective`` restores the default
+        three-quarter perspective view.
+
+        Args:
+            view: ``perspective``, ``top``, ``front``, or ``side``.
+
+        Raises:
+            ValueError: When ``view`` is not a known preset.
+        """
+        if view not in _VIEW_DIRECTIONS:
+            msg = f"unsupported view {view!r}"
+            raise ValueError(msg)
+        self.camera.fov = _PERSPECTIVE_FOV if view == "perspective" else 0.0
+        sphere = self._bounding_sphere([]) or (0.0, 0.0, 0.0, 2.0)
+        self._show_sphere(sphere, _VIEW_DIRECTIONS[view])
 
     def apply_transform_world(
         self,
@@ -1393,6 +1454,7 @@ class ViewportController:
         if not self._place_manip_proxy():
             self._clear_gizmo()
             return
+        self._proxy_rest = np.array(self._manip_proxy.world.matrix, dtype=np.float64)
         self._gizmo.set_object(self._manip_proxy)
 
     def _ensure_drag_started(self) -> None:
@@ -1400,7 +1462,13 @@ class ViewportController:
             return
         self._drag_active = True
         self._drag_rels.clear()
-        proxy = np.asarray(self._manip_proxy.world.matrix, dtype=np.float64)
+        # The gizmo has already moved the proxy by the first step; measure
+        # offsets from where it rested or objects lag the handle all drag.
+        proxy = (
+            self._proxy_rest
+            if self._proxy_rest is not None
+            else np.asarray(self._manip_proxy.world.matrix, dtype=np.float64)
+        )
         proxy_inv = np.asarray(la.mat_inverse(proxy), dtype=np.float64)
         for name in self._selected_order:
             group = self._groups.get(name)
@@ -1409,7 +1477,33 @@ class ViewportController:
             world = np.asarray(group.world.matrix, dtype=np.float64)
             self._drag_rels[name] = proxy_inv @ world
 
+    def _snap_proxy(self) -> None:
+        """Quantize the proxy's drag delta when snapping is active."""
+        modifiers = self._gizmo.drag_modifiers
+        held = "Control" in modifiers or "Meta" in modifiers
+        if self._snap_enabled == held or self._proxy_rest is None:
+            return
+        current = np.asarray(self._manip_proxy.world.matrix, dtype=np.float64)
+        tool = self._gizmo.tool
+        if tool == "translate":
+            snapped = snap_translation(
+                self._proxy_rest,
+                current,
+                self._settings.snap_translate,
+                local_axes=self._gizmo.space == "local",
+            )
+        elif tool == "rotate":
+            snapped = snap_rotation(
+                self._proxy_rest,
+                current,
+                float(np.radians(self._settings.snap_rotate_degrees)),
+            )
+        else:
+            return
+        self._manip_proxy.world.matrix = snapped
+
     def _apply_proxy_to_scene(self) -> None:
+        self._snap_proxy()
         if self._affect_pivot:
             if len(self._selected_order) != 1:
                 return
@@ -1459,19 +1553,24 @@ class ViewportController:
         self._on_selection_changed(self.selected_names)
 
     def _select_from_click(self, name: str | None, modifiers: Sequence[str]) -> None:
-        additive = bool(_ADDITIVE_MODIFIERS.intersection(modifiers))
+        """Apply a pick with Maya modifiers.
+
+        Shift toggles, Ctrl removes, Ctrl+Shift adds, plain click replaces.
+        Meta counts as Ctrl so macOS Command behaves the same.
+        """
+        shift = "Shift" in modifiers
+        ctrl = "Control" in modifiers or "Meta" in modifiers
         if name is None:
-            if additive:
+            if shift or ctrl:
                 return
             next_order: list[str] = []
-        elif additive:
-            next_order = list(self._selected_order)
-            if name in self._selected:
-                next_order = [item for item in next_order if item != name]
-            else:
-                next_order.append(name)
         else:
-            next_order = [name]
+            next_order = selection_after_click(
+                self._selected_order,
+                name,
+                shift=shift,
+                ctrl=ctrl,
+            )
 
         next_selected = set(next_order)
         if next_selected == self._selected and next_order == self._selected_order:
@@ -1490,6 +1589,10 @@ class ViewportController:
 
     def _on_pickable_click(self, event: gfx.PointerEvent) -> None:
         modifiers = event.modifiers or ()
+        if "Alt" in modifiers or event.button != 1:
+            # Alt+click and non-left buttons belong to camera navigation.
+            event.stop_propagation()
+            return
         target = event.target
         if not isinstance(target, gfx.WorldObject):
             return
@@ -1502,6 +1605,8 @@ class ViewportController:
         if self._updating:
             return
         modifiers = event.modifiers or ()
+        if "Alt" in modifiers or event.button != 1:
+            return
         pick = self.renderer.get_pick_info((event.x, event.y))
         world = pick.get("world_object")
         if world is None:
@@ -1513,6 +1618,36 @@ class ViewportController:
         if resolved is not None:
             return
         self._select_from_click(None, modifiers)
+
+
+def selection_after_click(
+    current: Sequence[str],
+    name: str,
+    *,
+    shift: bool,
+    ctrl: bool,
+) -> list[str]:
+    """Return the selection order after clicking ``name`` (Maya rules).
+
+    Args:
+        current: Selection order before the click (last is primary).
+        name: Transform UID that was clicked.
+        shift: Shift held — toggle ``name`` (add with Ctrl).
+        ctrl: Ctrl held — remove ``name`` (add with Shift).
+
+    Returns:
+        The new selection order.
+    """
+    order = list(current)
+    if shift and ctrl:
+        return order if name in order else [*order, name]
+    if ctrl:
+        return [item for item in order if item != name]
+    if shift:
+        if name in order:
+            return [item for item in order if item != name]
+        return [*order, name]
+    return [name]
 
 
 def attach_viewport(

@@ -356,6 +356,31 @@ def test_escape_cancels_drag(qtbot) -> None:
     assert events["changed"] == []
 
 
+def _claims_escape(label: _ScrubLabel) -> bool:
+    # Qt sends ShortcutOverride, ignored, before matching window shortcuts.
+    # Accepting it is how a widget keeps a key from a host's shortcut.
+    event = QKeyEvent(
+        QEvent.Type.ShortcutOverride,
+        Qt.Key.Key_Escape,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    event.ignore()
+    QApplication.sendEvent(label, event)
+    return event.isAccepted()
+
+
+def test_drag_claims_escape_from_window_shortcuts(qtbot) -> None:
+    panel = PropertiesPanel()
+    qtbot.addWidget(panel)
+    panel.set_model(_Numbers())
+    label = _row_label(panel, "weight")
+    assert not _claims_escape(label)
+    _drag(label, [30.0, 60.0], release=False)
+    assert _claims_escape(label)
+    _mouse(label, QEvent.Type.MouseButtonRelease, 60.0, buttons=Qt.MouseButton.NoButton)
+    assert not _claims_escape(label)
+
+
 def test_read_only_label_does_not_drag(qtbot) -> None:
     panel = PropertiesPanel()
     qtbot.addWidget(panel)
