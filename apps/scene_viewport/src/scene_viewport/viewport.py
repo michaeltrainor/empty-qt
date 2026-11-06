@@ -262,7 +262,14 @@ class ViewportController:
         self._overlay_camera = gfx.ScreenCoordsCamera(invert_y=True)
         self._box_line = gfx.Line(
             gfx.Geometry(positions=np.zeros((5, 3), dtype=np.float32)),
-            gfx.LineMaterial(thickness=1.0, color=_BOX_COLOR),  # pyright: ignore[reportArgumentType]
+            # No depth test: the overlay shares the scene's depth buffer, so
+            # meshes would hide the outline in the orthographic views.
+            gfx.LineMaterial(  # pyright: ignore[reportArgumentType]
+                thickness=1.0,
+                color=_BOX_COLOR,
+                depth_test=False,
+                depth_write=False,
+            ),
         )
         self._box_line.visible = False
         self._overlay_scene.add(self._box_line)
