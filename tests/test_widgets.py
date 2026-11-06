@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QTreeView, QWidget
+import pytest
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QApplication, QFileDialog, QTreeView, QWidget
 
 from mtqt import SceneGraphModel
 from mtqt.widgets import LabeledLineEdit, PathPicker, SceneGraphTree
@@ -218,3 +221,31 @@ def test_scene_graph_tree_empty_selection(qtbot) -> None:
     assert isinstance(tree.model, SceneGraphModel)
     assert isinstance(tree.view, QTreeView)
     assert tree.view.model() is tree.model
+
+
+def _claims_key(widget: QWidget, key: Qt.Key, modifiers: Qt.KeyboardModifier) -> bool:
+    # Qt sends ShortcutOverride, ignored, before matching window shortcuts.
+    event = QKeyEvent(QEvent.Type.ShortcutOverride, key, modifiers)
+    event.ignore()
+    QApplication.sendEvent(widget, event)
+    return event.isAccepted()
+
+
+@pytest.mark.parametrize(
+    ("key", "modifiers", "claimed"),
+    [
+        (Qt.Key.Key_Home, Qt.KeyboardModifier.NoModifier, True),
+        (Qt.Key.Key_End, Qt.KeyboardModifier.ShiftModifier, True),
+        (Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier, True),
+        (Qt.Key.Key_Home, Qt.KeyboardModifier.KeypadModifier, True),
+        (Qt.Key.Key_Home, Qt.KeyboardModifier.ControlModifier, False),
+        (Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier, False),
+    ],
+)
+def test_scene_graph_tree_claims_navigation_keys(
+    qtbot, key: Qt.Key, modifiers: Qt.KeyboardModifier, claimed: bool
+) -> None:
+    """Row navigation keys beat host window shortcuts; other keys don't."""
+    tree = SceneGraphTree([["root", ["child"]]])
+    qtbot.addWidget(tree)
+    assert _claims_key(tree.view, key, modifiers) is claimed

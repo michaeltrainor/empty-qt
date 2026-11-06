@@ -117,7 +117,7 @@ book.set_pages([("Transform", transform), ("Mesh", mesh)])
 
 ## Scene graph tree
 
-`SceneGraphTree` **contains** a `QTreeView` bound to `SceneGraphModel`. Pass a nested list-of-lists forest or a JSON `path`. The view uses extended selection. `currentNameChanged` emits the current UID as `str`. `selectedNamesChanged` emits all selected UIDs as `list[str]`. Use `selected_names` / `set_selected_names` to read or replace the multi-selection. `SceneGraphModel.index_for_name` looks up a UID.
+`SceneGraphTree` **contains** a `QTreeView` bound to `SceneGraphModel`. Pass a nested list-of-lists forest or a JSON `path`. The view uses extended selection. `currentNameChanged` emits the current UID as `str`. `selectedNamesChanged` emits all selected UIDs as `list[str]`. Use `selected_names` / `set_selected_names` to read or replace the multi-selection. `SceneGraphModel.index_for_name` looks up a UID. While the tree has focus, its navigation keys (arrows, Home, End, Page Up/Down, alone or with Shift) take priority over the host window's shortcuts; letters and other keys still reach them.
 
 ```python
 from pathlib import Path

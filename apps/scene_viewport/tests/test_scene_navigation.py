@@ -71,6 +71,30 @@ def test_snap_translation_local_stays_on_axis() -> None:
     assert np.allclose(snapped[:3, 3], axis * 1.5)
 
 
+def test_snap_translation_local_sheared_frame_stays_on_axis() -> None:
+    """Under shear, a drag along one local axis snaps along that axis only."""
+    # A rotated child under a non-uniformly scaled parent: columns not orthogonal.
+    parent = mat_from_trs((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (3.0, 1.0, 1.0))
+    child = mat_from_trs((0.0, 0.0, 0.0), (0.0, 0.0, math.pi / 6), (1.0, 1.0, 1.0))
+    start = parent @ child
+    axes = start[:3, :3] / np.linalg.norm(start[:3, :3], axis=0)
+    assert abs(axes[:, 0] @ axes[:, 1]) > 0.1
+    current = start.copy()
+    current[:3, 3] = axes[:, 1] * 1.3
+    snapped = snap_translation(start, current, 0.5, local_axes=True)
+    assert np.allclose(snapped[:3, 3], axes[:, 1] * 1.5)
+
+
+def test_snap_translation_local_zero_scale_stays_finite() -> None:
+    """A zero-scale axis used to divide by zero and return NaN."""
+    rotation = (0.0, math.pi / 4, 0.0)
+    start = mat_from_trs((0.0, 0.0, 0.0), rotation, (1.0, 0.0, 1.0))
+    current = start.copy()
+    current[:3, 3] = (0.7, 0.2, -0.6)
+    snapped = snap_translation(start, current, 0.5, local_axes=True)
+    assert np.all(np.isfinite(snapped))
+
+
 def test_snap_translation_non_positive_step_is_noop() -> None:
     """A zero step returns the current matrix unchanged."""
     start = mat_from_trs((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
