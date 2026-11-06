@@ -12,6 +12,14 @@ import pylinalg as la
 from PySide6.QtWidgets import QWidget  # noqa: F401  # select Qt before rendercanvas
 from rendercanvas.qt import QRenderWidget
 
+from scene_viewport.box_select import (
+    BOX_THRESHOLD_PX,
+    ScreenRect,
+    normalized_rect,
+    rects_overlap,
+    screen_bounds,
+    selection_after_box,
+)
 from scene_viewport.components import (
     LightComponent,
     MeshComponent,
@@ -43,6 +51,7 @@ _DRAW_WIRE_COLOR = "#1c1c1c"
 _BBOX_COLOR = "#c8c8c8"
 _BBOX_SELECTED_COLOR = "#5eb0ff"
 _PERSPECTIVE_FOV = 50.0
+_BOX_COLOR = "#e6e6e6"
 
 Vec3 = tuple[float, float, float]
 
@@ -50,6 +59,8 @@ Vec3 = tuple[float, float, float]
 # default value: `intensity=1` becomes `int`, and passing a float is flagged.
 # The `pyright: ignore[reportArgumentType]` comments in this module cover only
 # those calls into pygfx, plus one `set_object(None)` that pygfx accepts.
+# One `reportAttributeAccessIssue` ignore covers `camera_matrix`, which pygfx
+# defines with a `@cached` descriptor that pyright types for `AffineBase` only.
 
 
 def _material_of[M: gfx.Material](obj: gfx.WorldObject, kind: type[M]) -> M:
@@ -156,6 +167,12 @@ class ViewportController:
         # Proxy world matrix when the gizmo was last placed (drag start).
         self._proxy_rest: np.ndarray | None = None
         self._snap_enabled = False
+        # Marquee drag state; see _on_box_pointer.
+        self._box_start: tuple[float, float] | None = None
+        self._box_end: tuple[float, float] = (0.0, 0.0)
+        self._box_active = False
+        # pygfx still sends a click when a drag ends on its start target.
+        self._suppress_click = False
         self._settings = AppSettings()
         self._background: gfx.Background | None = None
         self._ambient: gfx.AmbientLight | None = None
@@ -240,6 +257,22 @@ class ViewportController:
         self.scene.add(self._gizmo)
         self._gizmo.add_default_event_handlers(self.renderer, self.camera)
 
+        # Screen-space overlay for the marquee rectangle (y down, in pixels).
+        self._overlay_scene = gfx.Scene()
+        self._overlay_camera = gfx.ScreenCoordsCamera(invert_y=True)
+        self._box_line = gfx.Line(
+            gfx.Geometry(positions=np.zeros((5, 3), dtype=np.float32)),
+            gfx.LineMaterial(thickness=1.0, color=_BOX_COLOR),  # pyright: ignore[reportArgumentType]
+        )
+        self._box_line.visible = False
+        self._overlay_scene.add(self._box_line)
+
+        self.renderer.add_event_handler(
+            self._on_box_pointer,
+            "pointer_down",
+            "pointer_move",
+            "pointer_up",
+        )
         self.renderer.add_event_handler(self._on_renderer_click, "click")
         canvas.request_draw(self._draw)
 
@@ -1371,7 +1404,11 @@ class ViewportController:
         group.visible = component.visible
 
     def _draw(self) -> None:
-        self.renderer.render(self.scene, self.camera)
+        if not self._box_line.visible:
+            self.renderer.render(self.scene, self.camera)
+            return
+        self.renderer.render(self.scene, self.camera, flush=False)
+        self.renderer.render(self._overlay_scene, self._overlay_camera)
 
     def _apply_highlights(self) -> None:
         selected_meshes: set[str] = set()
@@ -1572,6 +1609,10 @@ class ViewportController:
                 ctrl=ctrl,
             )
 
+        self._apply_picked_selection(next_order)
+
+    def _apply_picked_selection(self, next_order: list[str]) -> None:
+        """Select ``next_order`` from a viewport pick and notify the host."""
         next_selected = set(next_order)
         if next_selected == self._selected and next_order == self._selected_order:
             return
@@ -1587,7 +1628,149 @@ class ViewportController:
         finally:
             self._updating = False
 
+    def _consume_box_click(self) -> bool:
+        """Return True once for the click that pygfx sends after a box drag."""
+        if not self._suppress_click:
+            return False
+        self._suppress_click = False
+        return True
+
+    def _box_enabled(self) -> bool:
+        """Box selection needs plain left-drag, which some presets orbit with."""
+        return "mouse1" not in self._camera_controller.controls
+
+    def _on_box_pointer(self, event: gfx.PointerEvent) -> None:
+        """Track a left-drag on the viewport and box-select on release."""
+        if event.type == "pointer_down":
+            # A drag released outside the canvas sends no click to swallow.
+            self._suppress_click = False
+            modifiers = event.modifiers or ()
+            if event.button != 1 or "Alt" in modifiers or not self._box_enabled():
+                return
+            self._box_start = (float(event.x), float(event.y))
+            self._box_end = self._box_start
+            self._box_active = False
+            return
+        start = self._box_start
+        if start is None:
+            return
+        position = (float(event.x), float(event.y))
+        if event.type == "pointer_move":
+            self._box_end = position
+            if not self._box_active:
+                travel = np.hypot(position[0] - start[0], position[1] - start[1])
+                if travel < BOX_THRESHOLD_PX:
+                    return
+                self._box_active = True
+            self._show_box(normalized_rect(start, position))
+            return
+        if event.type != "pointer_up":
+            return
+        active = self._box_active
+        self._box_start = None
+        self._box_active = False
+        if not active:
+            return
+        self._hide_box()
+        self._suppress_click = True
+        modifiers = event.modifiers or ()
+        hits = self.box_hits(normalized_rect(start, position))
+        self._apply_picked_selection(
+            selection_after_box(
+                self._selected_order,
+                hits,
+                shift="Shift" in modifiers,
+                ctrl="Control" in modifiers or "Meta" in modifiers,
+            )
+        )
+
+    def _show_box(self, rect: ScreenRect) -> None:
+        left, top, right, bottom = rect
+        geometry = self._box_line.geometry
+        if geometry is None:
+            return
+        positions = geometry.positions
+        # Half-pixel offset keeps the 1px outline crisp.
+        positions.data[:] = np.array(
+            [
+                [left + 0.5, top + 0.5, 0.5],
+                [right + 0.5, top + 0.5, 0.5],
+                [right + 0.5, bottom + 0.5, 0.5],
+                [left + 0.5, bottom + 0.5, 0.5],
+                [left + 0.5, top + 0.5, 0.5],
+            ],
+            dtype=np.float32,
+        )
+        positions.update_range(0, positions.nitems)
+        self._box_line.visible = True
+        self._canvas.request_draw()
+
+    def _hide_box(self) -> None:
+        self._box_line.visible = False
+        self._canvas.request_draw()
+
+    def _shape_points(self, name: str) -> np.ndarray:
+        """World points that stand for ``name``'s own shapes on screen.
+
+        Meshes contribute their world bounding-box corners, lights and empty
+        transforms their origin. Child transforms are not included, so a box
+        touching a child selects the child, not its parent.
+        """
+        points: list[np.ndarray] = []
+        for mesh_name in self._transform_to_meshes.get(name, ()):
+            mesh = self._meshes.get(mesh_name)
+            if mesh is None:
+                continue
+            box = mesh.get_world_bounding_box()
+            if box is None:
+                continue
+            mn, mx = np.asarray(box, dtype=np.float64)
+            points.extend(
+                np.array([x, y, z])
+                for x in (mn[0], mx[0])
+                for y in (mn[1], mx[1])
+                for z in (mn[2], mx[2])
+            )
+        if not points:
+            group = self._groups[name]
+            points.append(np.asarray(group.world.position, dtype=np.float64))
+        return np.asarray(points, dtype=np.float64)
+
+    def _shown(self, name: str) -> bool:
+        """Whether ``name`` and every ancestor transform are visible."""
+        current: gfx.WorldObject | None = self._groups.get(name)
+        while current is not None:
+            if not current.visible:
+                return False
+            current = current.parent
+        return True
+
+    def box_hits(self, rect: ScreenRect) -> list[str]:
+        """Return visible transforms whose shapes touch a screen rect.
+
+        Args:
+            rect: ``(left, top, right, bottom)`` in logical pixels.
+
+        Returns:
+            Transform UIDs in scene order.
+        """
+        width, height = self.renderer.logical_size
+        size = (float(width), float(height))
+        matrix = self.camera.camera_matrix  # pyright: ignore[reportAttributeAccessIssue]
+        view_projection = np.asarray(matrix, dtype=np.float64)
+        hits: list[str] = []
+        for name in self._groups:
+            if not self._shown(name):
+                continue
+            bounds = screen_bounds(view_projection, self._shape_points(name), size)
+            if bounds is not None and rects_overlap(bounds, rect):
+                hits.append(name)
+        return hits
+
     def _on_pickable_click(self, event: gfx.PointerEvent) -> None:
+        if self._consume_box_click():
+            event.stop_propagation()
+            return
         modifiers = event.modifiers or ()
         if "Alt" in modifiers or event.button != 1:
             # Alt+click and non-left buttons belong to camera navigation.
@@ -1602,7 +1785,7 @@ class ViewportController:
         event.stop_propagation()
 
     def _on_renderer_click(self, event: gfx.PointerEvent) -> None:
-        if self._updating:
+        if self._updating or self._consume_box_click():
             return
         modifiers = event.modifiers or ()
         if "Alt" in modifiers or event.button != 1:
