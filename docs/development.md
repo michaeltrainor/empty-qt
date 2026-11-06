@@ -48,6 +48,7 @@ uv run --package scene-viewport scene-viewport
 Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewport/gizmo.py`), wrapping `pygfx.TransformGizmo`:
 
 - **Tools** (toolbar + hotkeys): **Q** select, **W** move, **E** rotate, **R** scale; **D** edit pivot (affect pivot only).
+- **Handles**: as in Maya, you can grab anywhere on an axis line, not only its tip, to move along it (or scale, with the scale tool). An invisible 12px strip over each line takes the pick. Axis and plane moves stay exactly on the axis or plane under a perspective camera; stock pygfx let an X drag drift in Y.
 - **Shading** (**1**–**6**): bounding box, wireframe on shaded, flat, wireframe, shaded, textured (optional `albedo_map` on Mesh).
 - **Document model**: `SceneWorld` owns transform/mesh/light tables and indexes; not a full ECS.
 - **Space**: toolbar World / Local (default world). Session preference drives the gizmo and Transform tab; TRS stays stored local.
@@ -56,11 +57,11 @@ Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewpo
 - **Undo**: Ctrl+Z / Ctrl+Y for create, delete, TRS, pivot, reparent, rename, and visibility.
 - **Session**: File → New / Open / Save; Ctrl+D duplicate; F2 rename; Ctrl+A select all, Alt+A deselect; Ctrl+H hide, Ctrl+I isolate, Ctrl+Shift+I or Ctrl+Shift+H show all; `visible` on the Transform tab.
 - **Camera**: Preferences → Navigation picks Maya (Alt+LMB tumble, Alt+MMB track, Alt+RMB dolly; the default), Blender (MMB orbit, Shift+MMB pan, Ctrl+MMB zoom), or stock pygfx bindings. The status bar shows the active bindings. View → **F** frame selection, **A** / Home frame all, numpad **7** / **1** / **3** orthographic top / front / side, numpad **5** perspective.
-- **Selection**: Maya click modifiers. Shift toggles, Ctrl removes, Ctrl+Shift adds. Alt+click never changes the selection.
+- **Selection**: Maya click modifiers. Shift toggles, Ctrl removes, Ctrl+Shift adds. Alt+click never changes the selection. Left-drag on the viewport draws a selection box: anything it touches is selected, with the same modifiers, and a plain drag over empty space clears the selection. A drag that starts on a manipulator handle moves the selection instead. A child is selected without its parent. Hidden objects are skipped. Box selection is off under the pygfx preset, where left-drag orbits.
 - **Snapping**: toolbar Snap (**X**) rounds move and rotate drags to the Preferences steps (0.5 units and 15° by default). Hold Ctrl during a drag to invert it. Local-space moves snap along the local axes.
 - **Look**: meshes use Standard/PBR (roughness/metalness + procedural IBL); optional albedo path; selection is outline-only; Preferences cover exposure, gamma (2.2 = standard sRGB), solid/gradient/skybox background (solid Maya gray `#5c5c5c` by default, unlit and separate from IBL), and shadow bias / extent / cull (keep bias tiny so contact shadows stay attached). Point/spot shadows pin perspective near/far after pygfx's per-frame reset. No shared material library.
 - **Write-back**: Drag updates the local store; the properties book refreshes on pointer release.
-- **Not in scope yet**: marquee selection, scale snapping, screen space, custom HDRIs.
+- **Not in scope yet**: scale snapping, screen space, custom HDRIs.
 
 Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.json`, debugpy, integrated terminal):
 

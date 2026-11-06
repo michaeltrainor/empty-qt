@@ -122,6 +122,7 @@ class SceneViewportWindow(QMainWindow):
     rename, **F** frame selected, **A** frame all, Ctrl+I isolate, Ctrl+H
     hide. Numpad **7** / **1** / **3** / **5** switch to top / front / side /
     perspective. **X** toggles snapping (hold Ctrl mid-drag to invert).
+    Left-drag box-selects (Shift / Ctrl / Ctrl+Shift as for clicks).
     Camera bindings follow the Maya, Blender, or pygfx preset in
     Preferences. File menu saves/loads the scene. Ctrl+Z / Ctrl+Y undo and
     redo.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Scene viewport manipulator: grab anywhere on an axis line, not only its
+  small tip, to move or scale along it. Pressing a line used to fall
+  through to the object behind it. Moves along an axis or plane no longer
+  drift off it under a perspective camera, so an X drag leaves Y alone.
+- Box-select in the scene viewport: left-drag draws a rectangle and selects
+  every visible object it touches. Shift toggles, Ctrl removes, and
+  Ctrl+Shift adds, as for clicks. It is off under the pygfx camera preset,
+  where left-drag orbits.
 - `PropertiesPanel` adds three ways to edit numbers:
   - Drag a numeric row's label, or a vector's X/Y/Z label, to change the
     value. Ctrl gives fine steps, Shift gives coarse ones, and Esc cancels,

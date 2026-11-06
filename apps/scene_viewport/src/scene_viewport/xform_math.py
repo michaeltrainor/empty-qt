@@ -152,3 +152,65 @@ def snap_rotation(
     snapped = round(angle / step) * step
     rotation = la.quat_mul(la.quat_from_axis_angle(axis, snapped), q0)
     return np.asarray(la.mat_compose(position, rotation, scale), dtype=np.float64)
+
+
+def closest_axis_offset(
+    origin: np.ndarray,
+    axis: np.ndarray,
+    ray_origin: np.ndarray,
+    ray_direction: np.ndarray,
+) -> np.ndarray | None:
+    """Return the offset along ``axis`` to the point nearest a pointer ray.
+
+    Used to keep a one-axis drag exactly on its axis: the result is
+    ``s * axis`` for the ``s`` that brings ``origin + s * axis`` closest to
+    the ray.
+
+    Args:
+        origin: Point the axis passes through (the grabbed handle).
+        axis: Axis direction; need not be unit length.
+        ray_origin: Start of the ray under the pointer.
+        ray_direction: Direction of that ray.
+
+    Returns:
+        The world-space offset from ``origin``, or ``None`` when the ray is
+        parallel to the axis and no single nearest point exists.
+    """
+    u = np.asarray(axis, dtype=np.float64)
+    v = np.asarray(ray_direction, dtype=np.float64)
+    w0 = np.asarray(origin, dtype=np.float64) - np.asarray(ray_origin, dtype=np.float64)
+    a, b, c = float(u @ u), float(u @ v), float(v @ v)
+    denom = a * c - b * b
+    if a <= 0.0 or c <= 0.0 or abs(denom) <= 1e-9 * a * c:
+        return None
+    s = (b * float(v @ w0) - c * float(u @ w0)) / denom
+    return u * s
+
+
+def ray_plane_offset(
+    origin: np.ndarray,
+    normal: np.ndarray,
+    ray_origin: np.ndarray,
+    ray_direction: np.ndarray,
+) -> np.ndarray | None:
+    """Return the offset from ``origin`` to where a ray meets its plane.
+
+    Args:
+        origin: A point on the plane (the grabbed handle).
+        normal: Plane normal; need not be unit length.
+        ray_origin: Start of the ray under the pointer.
+        ray_direction: Direction of that ray.
+
+    Returns:
+        The world-space offset from ``origin``, or ``None`` when the ray is
+        parallel to the plane.
+    """
+    n = np.asarray(normal, dtype=np.float64)
+    d = np.asarray(ray_direction, dtype=np.float64)
+    o = np.asarray(origin, dtype=np.float64)
+    r = np.asarray(ray_origin, dtype=np.float64)
+    denom = float(n @ d)
+    if abs(denom) <= 1e-9 * float(np.linalg.norm(n) * np.linalg.norm(d)):
+        return None
+    t = float(n @ (o - r)) / denom
+    return r + d * t - o
