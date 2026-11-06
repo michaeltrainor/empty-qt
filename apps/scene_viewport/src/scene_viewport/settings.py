@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from scene_viewport.navigation import NavigationStyle
+
 Space = Literal["local", "world"]
 BackgroundMode = Literal["solid", "gradient", "skybox"]
 ShadowCull = Literal["front", "back", "none"]
@@ -32,6 +34,25 @@ class AppSettings(BaseModel):
         default="world",
         title="Default Edit Space",
         description="World or local for new objects and the toolbar.",
+    )
+    navigation_style: NavigationStyle = Field(
+        default="maya",
+        title="Navigation",
+        description="Camera mouse bindings: Maya (Alt+drag), Blender (MMB), pygfx.",
+    )
+    snap_translate: float = Field(
+        default=0.5,
+        ge=0.01,
+        le=100.0,
+        title="Move Snap Step",
+        description="World units per step while snapping (X or hold Ctrl).",
+    )
+    snap_rotate_degrees: float = Field(
+        default=15.0,
+        ge=1.0,
+        le=180.0,
+        title="Rotate Snap Step",
+        description="Degrees per step while snapping (X or hold Ctrl).",
     )
     show_grid: bool = Field(default=True, title="Show Grid")
     show_axes: bool = Field(

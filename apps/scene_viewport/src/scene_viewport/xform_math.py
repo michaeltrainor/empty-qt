@@ -86,3 +86,69 @@ def local_trs_under_parent(
     parent = np.asarray(parent_world, dtype=np.float64)
     local = la.mat_inverse(parent) @ world
     return trs_from_mat(local)
+
+
+def snap_translation(
+    start: np.ndarray,
+    current: np.ndarray,
+    step: float,
+    *,
+    local_axes: bool = False,
+) -> np.ndarray:
+    """Round the translation delta from ``start`` to ``current`` to ``step``.
+
+    Args:
+        start: World matrix when the drag began.
+        current: World matrix after the latest drag step.
+        step: Increment in world units. Non-positive values disable snapping.
+        local_axes: Quantize along ``start``'s rotated axes instead of world
+            X/Y/Z, so a local-space drag stays on its handle axis.
+
+    Returns:
+        ``current`` with its translation replaced by the snapped value.
+    """
+    start = np.asarray(start, dtype=np.float64)
+    out = np.array(current, dtype=np.float64)
+    if step <= 0.0:
+        return out
+    delta = out[:3, 3] - start[:3, 3]
+    if local_axes:
+        frame = start[:3, :3] / np.linalg.norm(start[:3, :3], axis=0)
+        delta = frame @ (np.round((frame.T @ delta) / step) * step)
+    else:
+        delta = np.round(delta / step) * step
+    out[:3, 3] = start[:3, 3] + delta
+    return out
+
+
+def snap_rotation(
+    start: np.ndarray,
+    current: np.ndarray,
+    step: float,
+) -> np.ndarray:
+    """Round the rotation from ``start`` to ``current`` to ``step`` radians.
+
+    Args:
+        start: World matrix when the drag began.
+        current: World matrix after the latest drag step.
+        step: Angle increment in radians. Non-positive values disable snapping.
+
+    Returns:
+        ``current`` with its rotation replaced by the snapped value.
+    """
+    out = np.array(current, dtype=np.float64)
+    if step <= 0.0:
+        return out
+    _p0, q0, _s0 = la.mat_decompose(np.asarray(start, dtype=np.float64))
+    position, q1, scale = la.mat_decompose(out)
+    delta = np.asarray(la.quat_mul(q1, la.quat_inv(q0)), dtype=np.float64)
+    if delta[3] < 0.0:
+        delta = -delta
+    angle = 2.0 * float(np.arccos(np.clip(delta[3], -1.0, 1.0)))
+    sin_half = float(np.linalg.norm(delta[:3]))
+    if sin_half < 1e-9:
+        return np.asarray(la.mat_compose(position, q0, scale), dtype=np.float64)
+    axis = delta[:3] / sin_half
+    snapped = round(angle / step) * step
+    rotation = la.quat_mul(la.quat_from_axis_angle(axis, snapped), q0)
+    return np.asarray(la.mat_compose(position, rotation, scale), dtype=np.float64)

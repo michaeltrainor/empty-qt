@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, SupportsFloat, cast, get_args, get_o
 import annotated_types as at
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -329,6 +329,19 @@ class _ScrubLabel(QLabel):
         if dragged:
             self.scrubFinished.emit()
         event.accept()
+
+    def event(self, event: QEvent) -> bool:
+        # Claim Esc during a drag, or a host window's Esc shortcut takes it
+        # before keyPressEvent can cancel the scrub.
+        if (
+            event.type() == QEvent.Type.ShortcutOverride
+            and self._dragging
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            event.accept()
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self._dragging:

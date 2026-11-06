@@ -41,6 +41,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
     ) -> None:
         self._tool: GizmoTool = "translate"
         self._on_changed = on_changed
+        self._drag_modifiers: tuple[str, ...] = ()
         super().__init__(object=object, screen_size=screen_size)  # pyright: ignore[reportArgumentType]  # pygfx param is unannotated, inferred int
         self.toggle_mode("world")
         self._promote_overlay()
@@ -64,6 +65,11 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                 continue
             material.depth_test = False
             material.depth_write = False
+
+    @property
+    def drag_modifiers(self) -> tuple[str, ...]:
+        """Keyboard modifiers held on the latest drag move or release."""
+        return self._drag_modifiers
 
     @property
     def tool(self) -> GizmoTool:
@@ -180,6 +186,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                 return
             # Skip stock toggle_mode on center click — toolbar owns space.
             self._ref = None
+            self._drag_modifiers = tuple(event.modifiers or ())
             self._highlight()
             self._request_draw()
             if self._on_changed is not None:
@@ -195,6 +202,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                 + (event.y - self._ref["event_pos"][1]) ** 2
             ) ** 0.5
             self._ref["maxdist"] = max(self._ref["maxdist"], dist)
+            self._drag_modifiers = tuple(event.modifiers or ())
             if self._ref["maxdist"] >= 3:
                 if self._ref["kind"] == "translate":
                     self._handle_translate_move(event)

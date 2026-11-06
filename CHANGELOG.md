@@ -4,7 +4,8 @@
 
 - `PropertiesPanel` adds three ways to edit numbers:
   - Drag a numeric row's label, or a vector's X/Y/Z label, to change the
-    value. Ctrl gives fine steps, Shift gives coarse ones, and Esc cancels.
+    value. Ctrl gives fine steps, Shift gives coarse ones, and Esc cancels,
+    even when the host window has its own Esc shortcut.
   - `int` and `float` fields with both bounds get a slider.
     `mtqt_slider: False` turns it off, and `mtqt_soft_range` sets a slider
     range that typed values can go past.
@@ -71,6 +72,13 @@
   `uv sync --all-packages`, and run it with
   `uv run --package scene-viewport scene-viewport`. This replaces the
   `examples` dependency group.
+- Make the scene viewport navigate like Maya or Blender. Preferences pick
+  Maya (default), Blender, or pygfx camera bindings. The View menu adds
+  frame all and orthographic top / front / side views. Toolbar snapping
+  covers move and rotate. Clicks follow Maya's selection modifiers. New
+  shortcuts: Ctrl+A select all, Alt+A deselect, Ctrl+H hide. A status bar
+  shows the selection, tool, and camera bindings. Fix objects lagging the
+  manipulator by its first drag step.
 
 ## 0.2.0 — 2026-11-02
 
