@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Scene viewport fixes:
+  - The box-select outline stays visible over meshes in the top, front,
+    and side views.
+  - Shift+ or Ctrl+drag on a manipulator handle moves the selection
+    (Ctrl inverts snapping) instead of starting a box.
+  - Releasing Ctrl a moment before the mouse button no longer snaps or
+    unsnaps the final position of a drag.
 - Scene viewport manipulator: grab anywhere on an axis line, not only its
   small tip, to move or scale along it. Pressing a line used to fall
   through to the object behind it. Moves along an axis or plane no longer

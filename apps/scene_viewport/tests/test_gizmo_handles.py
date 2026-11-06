@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -91,3 +93,68 @@ def test_rotate_tool_hides_axis_lines_and_their_strips() -> None:
     assert not any(line.visible for line in gizmo._line_children)
     gizmo.set_tool("translate")
     assert all(line.visible for line in gizmo._line_children)
+
+
+def _pointer(kind: str, target: object = None, **fields: object) -> SimpleNamespace:
+    """A stand-in for a pygfx pointer event with a no-op ``stop_propagation``."""
+    stopped: list[bool] = []
+    defaults: dict[str, object] = {
+        "button": 1,
+        "modifiers": (),
+        "x": 0.0,
+        "y": 0.0,
+        "pointer_id": 1,
+        "root": None,
+    }
+    return SimpleNamespace(
+        type=kind,
+        target=target,
+        stopped=stopped,
+        stop_propagation=lambda: stopped.append(True),
+        **(defaults | fields),
+    )
+
+
+def _grabbing_gizmo(monkeypatch: pytest.MonkeyPatch) -> tuple[object, list[str]]:
+    """A gizmo on an object, with drag start and pointer capture recorded."""
+    gizmo = MayaTransformGizmo(gfx.WorldObject())
+    started: list[str] = []
+    monkeypatch.setattr(
+        gizmo, "_handle_start", lambda kind, _event, _ob: started.append(kind)
+    )
+    monkeypatch.setattr(gizmo, "set_pointer_capture", lambda *_args: None)
+    return gizmo, started
+
+
+@pytest.mark.parametrize("modifiers", [(), ("Shift",), ("Control",), ("Meta",)])
+def test_shift_or_ctrl_press_still_grabs_a_handle(
+    monkeypatch: pytest.MonkeyPatch, modifiers: tuple[str, ...]
+) -> None:
+    """Modified presses grab instead of falling through to a box select."""
+    gizmo, started = _grabbing_gizmo(monkeypatch)
+    event = _pointer("pointer_down", gizmo._translate_children[0], modifiers=modifiers)
+    gizmo.process_event(event)
+    assert started == ["translate"]
+    assert event.stopped
+
+
+def test_alt_press_leaves_the_handle_to_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Alt+left orbits in the Maya preset, so the gizmo must not take it."""
+    gizmo, started = _grabbing_gizmo(monkeypatch)
+    event = _pointer("pointer_down", gizmo._translate_children[0], modifiers=("Alt",))
+    gizmo.process_event(event)
+    assert started == []
+    assert not event.stopped
+
+
+def test_release_keeps_the_last_move_modifiers() -> None:
+    """Letting go of Ctrl just before the button must not change the snap."""
+    finals: list[bool] = []
+    gizmo = MayaTransformGizmo(gfx.WorldObject(), on_changed=finals.append)
+    gizmo._ref = {"event_pos": (0.0, 0.0), "maxdist": 0.0, "kind": "translate"}
+    gizmo.process_event(_pointer("pointer_move", modifiers=("Control",)))
+    gizmo.process_event(_pointer("pointer_up"))
+    assert gizmo.drag_modifiers == ("Control",)
+    assert finals == [True]

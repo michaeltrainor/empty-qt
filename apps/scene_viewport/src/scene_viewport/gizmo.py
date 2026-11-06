@@ -112,7 +112,7 @@ class MayaTransformGizmo(gfx.TransformGizmo):
 
     @property
     def drag_modifiers(self) -> tuple[str, ...]:
-        """Keyboard modifiers held on the latest drag move or release."""
+        """Keyboard modifiers held on the latest drag move."""
         return self._drag_modifiers
 
     @property
@@ -243,7 +243,9 @@ class MayaTransformGizmo(gfx.TransformGizmo):
             return
 
         if event.type == "pointer_down":
-            if event.button != 1 or event.modifiers:
+            # Shift and Ctrl still grab (Ctrl toggles snapping); Alt belongs
+            # to camera navigation. A press the gizmo ignores starts a box.
+            if event.button != 1 or "Alt" in (event.modifiers or ()):
                 return
             self._ref = None
             ob = event.target
@@ -286,7 +288,8 @@ class MayaTransformGizmo(gfx.TransformGizmo):
                 return
             # Skip stock toggle_mode on center click — toolbar owns space.
             self._ref = None
-            self._drag_modifiers = tuple(event.modifiers or ())
+            # Keep the last move's modifiers: releasing Ctrl just before the
+            # button would otherwise snap or unsnap the final position.
             self._highlight()
             self._request_draw()
             if self._on_changed is not None:
