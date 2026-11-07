@@ -23,6 +23,10 @@ def to_geometry(buffers: MeshBuffers) -> gfx.Geometry:
         # With tangents pygfx normal-maps in a fixed frame; without them it
         # derives one from the view, which collapses in orthographic views.
         geometry.tangents = gfx.Buffer(buffers.tangents)
+    if buffers.texcoords1 is not None:
+        geometry.texcoords1 = gfx.Buffer(buffers.texcoords1)
+    if buffers.colors is not None:
+        geometry.colors = gfx.Buffer(buffers.colors)
     return geometry
 
 

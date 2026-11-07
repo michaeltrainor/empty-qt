@@ -9,7 +9,12 @@ import pygfx as gfx
 from numpy.typing import NDArray
 from PySide6.QtGui import QImage
 
-from scene_viewport.mesh.importer import ImportedMaps, ModelImportError, load_model
+from scene_viewport.mesh.importer import (
+    ImportedMaps,
+    MaterialSurface,
+    ModelImportError,
+    load_model,
+)
 
 
 def load_albedo_texture(path: Path) -> gfx.Texture | None:
@@ -72,6 +77,29 @@ def texture_from_rgba(
         dim=2,
         colorspace="srgb" if color else "physical",
     )
+
+
+def file_material(
+    source: Path, mesh: str
+) -> tuple[MaterialSurface | None, ImportedMaps | None]:
+    """Return the surface and texture images of mesh ``mesh`` in ``source``.
+
+    One read of the model file serves both, so a material build stamps the
+    file once.
+
+    Args:
+        source: Model file, as stored on a ``file`` mesh.
+        mesh: Mesh key inside the file.
+
+    Returns:
+        ``(surface, maps)``, each ``None`` when the file can't be read or
+        has nothing for the mesh.
+    """
+    try:
+        model = load_model(source)
+    except ModelImportError:
+        return None, None
+    return model.materials.get(mesh), model.maps.get(mesh)
 
 
 def file_maps(source: Path, mesh: str) -> ImportedMaps | None:

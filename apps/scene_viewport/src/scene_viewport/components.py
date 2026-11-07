@@ -15,7 +15,23 @@ MeshKind = Literal["box", "plane", "sphere", "file"]
 #: How a mesh's alpha is used: ignored, cut at ``alpha_cutoff``, or blended.
 AlphaMode = Literal["opaque", "mask", "blend"]
 #: Texture images an imported mesh can carry (fields of ``ImportedMaps``).
-MapKind = Literal["base_color", "metallic_roughness", "normal", "emissive", "occlusion"]
+MapKind = Literal[
+    "base_color",
+    "metallic_roughness",
+    "normal",
+    "emissive",
+    "occlusion",
+    "clearcoat",
+    "clearcoat_roughness",
+    "clearcoat_normal",
+    "specular",
+    "specular_color",
+    "sheen_color",
+    "sheen_roughness",
+    "iridescence",
+    "iridescence_thickness",
+    "anisotropy",
+]
 
 
 class TransformComponent(BaseModel):

@@ -19,6 +19,11 @@ Image = pytest.importorskip("PIL.Image")
 from trimesh.visual.material import PBRMaterial, SimpleMaterial  # noqa: E402
 
 from scene_viewport.components import MeshComponent  # noqa: E402
+from scene_viewport.materials import (  # noqa: E402
+    build_material,
+    surface_kwargs,
+    texture_map,
+)
 from scene_viewport.mesh.importer import load_model  # noqa: E402
 from scene_viewport.mesh.references import (  # noqa: E402
     reference_problems,
@@ -26,7 +31,11 @@ from scene_viewport.mesh.references import (  # noqa: E402
     remote_references,
     source_signature,
 )
-from scene_viewport.textures import file_maps, texture_from_rgba  # noqa: E402
+from scene_viewport.textures import (  # noqa: E402
+    file_maps,
+    file_material,
+    texture_from_rgba,
+)
 from scene_viewport.viewport import ViewportController  # noqa: E402
 
 RED = [255, 0, 0, 255]
@@ -63,10 +72,24 @@ def _host() -> SimpleNamespace:
     """Stand-in ``self`` for the viewport's texture lookups (no GPU window)."""
     host = SimpleNamespace(_albedo_cache={}, _albedo_stamps={})
     host._file_texture = functools.partial(ViewportController._file_texture, host)
-    host._file_maps = functools.partial(ViewportController._file_maps, host)
-    host._texture_map = ViewportController._texture_map
-    host._surface_kwargs = ViewportController._surface_kwargs
+    host._file_material = functools.partial(ViewportController._file_material, host)
     return host
+
+
+def _build(host: SimpleNamespace, component: MeshComponent, *, textured: bool = True):
+    """Build the material the viewport would, through the materials module."""
+    surface, maps = file_material(component.source, component.source_mesh)
+    albedo = ViewportController._albedo_texture(host, component, maps)  # type: ignore[arg-type]
+    return build_material(
+        component,
+        surface=surface,
+        maps=maps,
+        albedo=albedo if textured else None,
+        texture_for=lambda kind: host._file_texture(component, kind, maps),
+        textured=textured,
+        env_map=None,
+        env_map_intensity=1.0,
+    )
 
 
 def _maps(component: MeshComponent) -> object:
@@ -189,8 +212,8 @@ def test_imported_maps_go_on_the_textured_material(tmp_path: Path) -> None:
     component = MeshComponent(
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
-    target = pygfx.MeshStandardMaterial()
-    ViewportController._apply_file_maps(host, target, component, _maps(component))  # type: ignore[arg-type]
+    target = _build(host, component)
+    assert isinstance(target, pygfx.MeshStandardMaterial)
     assert target.roughness_map is not None
     assert target.metalness_map is not None
     assert target.roughness_map.texture is target.metalness_map.texture
@@ -207,8 +230,8 @@ def test_black_emissive_factor_leaves_emission_off(tmp_path: Path) -> None:
     component = MeshComponent(
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
-    target = pygfx.MeshStandardMaterial()
-    ViewportController._apply_file_maps(_host(), target, component, _maps(component))  # type: ignore[arg-type]
+    target = _build(_host(), component)
+    assert isinstance(target, pygfx.MeshStandardMaterial)
     assert target.emissive_map is None
 
 
@@ -465,7 +488,7 @@ def test_alpha_sides_and_occlusion_are_read_from_the_material(tmp_path: Path) ->
     maps = model.maps[key]
     assert maps.occlusion is not None
     assert maps.occlusion_strength == 1.0
-    assert maps.transforms == {}
+    assert all(item.transform is None for item in maps.sampling.values())
 
     # Plain materials stay opaque and single sided, as glTF defaults them.
     plain = load_model(_glb(tmp_path / "plain.glb", PBRMaterial()))
@@ -498,8 +521,10 @@ def test_unlit_transform_and_second_uv_set_come_from_the_json(tmp_path: Path) ->
     assert imported.unlit
     maps = model.maps[key]
     assert maps.base_color is not None
-    assert maps.transforms["base_color"].offset == (0.5, 0.0)
-    assert maps.transforms["base_color"].scale == (2.0, 1.0)
+    transform = maps.sampling["base_color"].transform
+    assert transform is not None
+    assert transform.offset == (0.5, 0.0)
+    assert transform.scale == (2.0, 1.0)
     # The occlusion map samples UV set 1, which trimesh never reads.
     assert maps.occlusion is None
     assert any("occlusion map uses UV set 1" in w for w in model.warnings)
@@ -534,7 +559,7 @@ def test_import_objects_copies_surface_fields(tmp_path: Path) -> None:
 
 
 def test_surface_kwargs_and_texture_map_transform() -> None:
-    kwargs = ViewportController._surface_kwargs
+    kwargs = surface_kwargs
     base = MeshComponent(name="s", transform="t", kind="box")
     assert kwargs(base) == {
         "side": "both",
@@ -559,21 +584,29 @@ def test_surface_kwargs_and_texture_map_transform() -> None:
     assert standard.alpha_test == 0.3
     assert pygfx.MeshBasicMaterial(**kwargs(glass)).side == "front"
 
-    from scene_viewport.mesh.gltf_extras import TextureTransform
+    from scene_viewport.mesh.gltf_extras import MapSampling, TextureTransform
     from scene_viewport.mesh.importer import ImportedMaps
 
     texture = texture_from_rgba(np.zeros((2, 2, 4), dtype=np.uint8))
     maps = ImportedMaps(
         base_color=np.zeros((2, 2, 4), dtype=np.uint8),
-        transforms={
-            "base_color": TextureTransform(offset=(0.5, 0.0), scale=(2.0, 2.0))
+        sampling={
+            "base_color": MapSampling(
+                uv_channel=1,
+                wrap_s="clamp",
+                wrap_t="mirror",
+                transform=TextureTransform(offset=(0.5, 0.0), scale=(2.0, 2.0)),
+            )
         },
     )
-    moved = ViewportController._texture_map(texture, "base_color", maps)
+    moved = texture_map(texture, "base_color", maps)
     assert tuple(moved.offset) == (0.5, 0.0)
     assert tuple(moved.scale) == (2.0, 2.0)
-    plain = ViewportController._texture_map(texture, "normal", maps)
+    assert moved.uv_channel == 1
+    assert (moved.wrap_s, moved.wrap_t) == ("clamp", "mirror")
+    plain = texture_map(texture, "normal", maps)
     assert tuple(plain.offset) == (0.0, 0.0)
+    assert plain.wrap_s == "repeat"
 
 
 def test_occlusion_map_goes_on_the_material(tmp_path: Path) -> None:
@@ -583,8 +616,167 @@ def test_occlusion_map_goes_on_the_material(tmp_path: Path) -> None:
     component = MeshComponent(
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
-    target = pygfx.MeshStandardMaterial()
-    ViewportController._apply_file_maps(_host(), target, component, _maps(component))  # type: ignore[arg-type]
+    target = _build(_host(), component)
+    assert isinstance(target, pygfx.MeshStandardMaterial)
     assert target.ao_map is not None
     assert target.ao_map.texture.colorspace == "physical"
     assert target.ao_map_intensity == 1.0
+
+
+def test_physical_extensions_build_a_physical_material(tmp_path: Path) -> None:
+    material = PBRMaterial(
+        baseColorTexture=_quadrants(),
+        emissiveTexture=_quadrants(),
+        emissiveFactor=[1, 1, 1],
+    )
+    gltf = _gltf_files(tmp_path, material)
+
+    def edit(document: dict) -> None:
+        mat = document["materials"][0]
+        mat["extensions"] = {
+            "KHR_materials_clearcoat": {
+                "clearcoatFactor": 0.7,
+                "clearcoatRoughnessFactor": 0.1,
+                "clearcoatTexture": {"index": 0},
+            },
+            "KHR_materials_ior": {"ior": 1.8},
+            "KHR_materials_sheen": {"sheenColorFactor": [0.2, 0.4, 0.6]},
+            "KHR_materials_iridescence": {"iridescenceFactor": 0.5},
+            "KHR_materials_anisotropy": {
+                "anisotropyStrength": 0.3,
+                "anisotropyRotation": 1.0,
+            },
+            "KHR_materials_specular": {
+                "specularFactor": 0.5,
+                "specularColorFactor": [1, 0, 0],
+            },
+            "KHR_materials_emissive_strength": {"emissiveStrength": 3.0},
+        }
+
+    _edit_gltf(gltf, edit)
+    model = load_model(gltf)
+    key = model.nodes[0].mesh
+    surface = model.materials[key]
+    assert surface is not None
+    assert surface.extensions.is_physical
+    maps = model.maps[key]
+    assert maps.clearcoat is not None  # decoded through the glTF document
+    component = MeshComponent(
+        name="quadShape", transform="quad", kind="file", source=gltf, source_mesh=key
+    )
+    target = _build(_host(), component)
+    assert isinstance(target, pygfx.MeshPhysicalMaterial)
+    assert target.clearcoat == pytest.approx(0.7)
+    assert target.clearcoat_roughness == pytest.approx(0.1)
+    assert target.clearcoat_map is not None
+    assert target.ior == pytest.approx(1.8)
+    assert target.sheen == 1.0
+    assert target.iridescence == pytest.approx(0.5)
+    assert target.anisotropy == pytest.approx(0.3)
+    assert target.anisotropy_rotation == pytest.approx(1.0)
+    assert target.specular_intensity == pytest.approx(0.5)
+    assert target.emissive_intensity == pytest.approx(3.0)
+    # A plain glTF material stays on the standard material.
+    plain = load_model(_glb(tmp_path / "plain.glb", PBRMaterial()))
+    plain_surface = plain.materials[plain.nodes[0].mesh]
+    assert plain_surface is not None
+    assert not plain_surface.extensions.is_physical
+
+
+def test_second_uv_set_and_vertex_colors_are_read(tmp_path: Path) -> None:
+    material = PBRMaterial(baseColorTexture=_quadrants(), occlusionTexture=_quadrants())
+    gltf = _gltf_files(tmp_path, material)
+    uv1 = np.array([[1, 1], [0, 1], [0, 0], [1, 0]], dtype=np.float32)
+    colors = np.array(
+        [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [9, 9, 9, 255]],
+        dtype=np.uint8,
+    )
+    (tmp_path / "extra.bin").write_bytes(uv1.tobytes() + colors.tobytes())
+
+    def edit(document: dict) -> None:
+        document["buffers"].append({"uri": "extra.bin", "byteLength": 32 + 16})
+        buffer = len(document["buffers"]) - 1
+        document["bufferViews"] += [
+            {"buffer": buffer, "byteOffset": 0, "byteLength": 32},
+            {"buffer": buffer, "byteOffset": 32, "byteLength": 16},
+        ]
+        views = len(document["bufferViews"])
+        document["accessors"] += [
+            {
+                "bufferView": views - 2,
+                "componentType": 5126,
+                "count": 4,
+                "type": "VEC2",
+            },
+            {
+                "bufferView": views - 1,
+                "componentType": 5121,
+                "count": 4,
+                "type": "VEC4",
+                "normalized": True,
+            },
+        ]
+        accessors = len(document["accessors"])
+        attributes = document["meshes"][0]["primitives"][0]["attributes"]
+        attributes["TEXCOORD_1"] = accessors - 2
+        attributes["COLOR_0"] = accessors - 1
+        document["materials"][0]["occlusionTexture"]["texCoord"] = 1
+
+    _edit_gltf(gltf, edit)
+    model = load_model(gltf)
+    key = model.nodes[0].mesh
+    buffers = model.meshes[key]
+    assert buffers.texcoords1 is not None
+    assert buffers.texcoords1.tolist() == uv1.tolist()
+    assert buffers.colors is not None
+    assert buffers.colors[0].tolist() == [1.0, 0.0, 0.0, 1.0]
+    surface = model.materials[key]
+    assert surface is not None
+    assert surface.vertex_colors
+    maps = model.maps[key]
+    # The occlusion map now samples the second UV set instead of being dropped.
+    assert maps.occlusion is not None
+    assert maps.sampling["occlusion"].uv_channel == 1
+    assert model.warnings == ()
+    component = MeshComponent(
+        name="quadShape", transform="quad", kind="file", source=gltf, source_mesh=key
+    )
+    textured = _build(_host(), component)
+    assert isinstance(textured, pygfx.MeshStandardMaterial)
+    assert textured.ao_map is not None
+    assert textured.ao_map.uv_channel == 1
+    # Without a base color texture in use, the vertex colors show.
+    shaded = _build(_host(), component, textured=False)
+    assert shaded.color_mode == "vertex"
+    assert textured.color_mode != "vertex"
+
+    from scene_viewport.mesh.geometry import to_geometry
+
+    geometry = to_geometry(buffers)
+    assert geometry.texcoords1 is not None
+    assert geometry.colors is not None
+
+
+def test_emissive_factor_applies_without_a_texture(tmp_path: Path) -> None:
+    """EmissiveStrengthTest-style files: a factor and strength, no emissive map."""
+    gltf = _gltf_files(tmp_path, PBRMaterial(emissiveFactor=[1.0, 0.5, 0.0]))
+
+    def edit(document: dict) -> None:
+        document["materials"][0]["extensions"] = {
+            "KHR_materials_emissive_strength": {"emissiveStrength": 6.0}
+        }
+
+    _edit_gltf(gltf, edit)
+    model = load_model(gltf)
+    key = model.nodes[0].mesh
+    surface = model.materials[key]
+    assert surface is not None
+    assert surface.emissive == (1.0, 0.5, 0.0)
+    component = MeshComponent(
+        name="quadShape", transform="quad", kind="file", source=gltf, source_mesh=key
+    )
+    shaded = _build(_host(), component, textured=False)
+    assert isinstance(shaded, pygfx.MeshStandardMaterial)
+    assert shaded.emissive_intensity == pytest.approx(6.0)
+    assert tuple(shaded.emissive.rgb) != (0.0, 0.0, 0.0)
+    assert shaded.emissive_map is None

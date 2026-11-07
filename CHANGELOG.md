@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Scene viewport import, second batch from the glTF sample survey:
+  - `KHR_materials_clearcoat`, `ior`, `specular`, `sheen`, `iridescence`,
+    and `anisotropy` render through pygfx's physical material, with their
+    textures; `KHR_materials_emissive_strength` scales emission. These
+    values are read from the file at draw time, like the maps.
+  - A second UV set (`TEXCOORD_1`) is read, so occlusion and other maps
+    that sample it show instead of being dropped.
+  - Vertex colors (`COLOR_0`, and PLY/OBJ per-vertex colors) show when the
+    mesh has no base color texture in use.
+  - Sampler wrap modes (clamp, mirror) apply per map.
+  - Internals: `MaterialSurface` is the one place the importer reads a
+    surface from a file, and `materials.build_material` the one place it
+    becomes a pygfx material; `GltfDocument` reads the accessors, images,
+    and samplers trimesh drops.
 - Scene viewport import, first batch from the glTF sample survey:
   - Alpha: glTF `alphaMode` MASK and BLEND, `alphaCutoff`, and the base
     color alpha now render (cut-out foliage, glass, decals). The Mesh tab
