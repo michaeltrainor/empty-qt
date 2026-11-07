@@ -20,10 +20,12 @@ from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
 from scene_viewport.mesh.gltf_extras import (
     GltfDocument,
+    ImportedCamera,
     ImportedLight,
     MapSampling,
     PrimitiveExtras,
     SurfaceExtensions,
+    read_cameras,
     read_lights,
 )
 from scene_viewport.mesh.references import (
@@ -217,6 +219,7 @@ class ImportedModel:
         warnings: Problems that didn't stop the load, such as a texture
             file that is missing or unreadable.
         lights: ``KHR_lights_punctual`` lights, each naming its node.
+        cameras: glTF cameras, each naming its node.
     """
 
     path: Path
@@ -226,6 +229,7 @@ class ImportedModel:
     maps: Mapping[str, ImportedMaps]
     warnings: tuple[str, ...] = ()
     lights: tuple[ImportedLight, ...] = ()
+    cameras: tuple[ImportedCamera, ...] = ()
 
 
 def is_importable(path: Path) -> bool:
@@ -364,6 +368,7 @@ def _parse(path: Path) -> ImportedModel:
         maps=maps,
         warnings=(*reference_problems(path), *warnings),
         lights=tuple(read_lights(document)) if document is not None else (),
+        cameras=tuple(read_cameras(document)) if document is not None else (),
     )
 
 
@@ -377,12 +382,18 @@ class _UnquotingResolver(FilePathResolver):
 def _nodes(
     scene: trimesh.Scene, meshes: Mapping[str, MeshBuffers]
 ) -> list[ImportedNode]:
-    """Walk the scene graph breadth-first from its base frame."""
+    """Walk the scene graph breadth-first from its base frame.
+
+    trimesh replaces a glTF camera node with its own camera node; that one
+    is skipped, since the importer rebuilds camera nodes from the JSON.
+    """
     graph = scene.graph
     base = str(graph.base_frame)
+    skip = {str(scene.camera.name)} if scene.has_camera else set()
     edges = {
         (str(parent), str(child)): data
         for (parent, child), data in graph.transforms.edge_data.items()
+        if str(child) not in skip
     }
     children: dict[str, list[str]] = {}
     for parent, child in edges:

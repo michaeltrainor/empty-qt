@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Sequence
 
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     TransformComponent,
@@ -30,6 +31,7 @@ class SceneWorld:
         transforms: Iterable[TransformComponent] = (),
         meshes: Iterable[MeshComponent] = (),
         lights: Iterable[LightComponent] = (),
+        cameras: Iterable[CameraComponent] = (),
     ) -> None:
         """Create a world from optional seed components.
 
@@ -37,20 +39,26 @@ class SceneWorld:
             transforms: Initial transform nodes.
             meshes: Initial mesh shapes.
             lights: Initial light shapes.
+            cameras: Initial camera shapes.
         """
         self._transforms: dict[str, TransformComponent] = {}
         self._meshes: dict[str, MeshComponent] = {}
         self._lights: dict[str, LightComponent] = {}
+        self._cameras: dict[str, CameraComponent] = {}
         self._mesh_to_transform: dict[str, str] = {}
         self._light_to_transform: dict[str, str] = {}
+        self._camera_to_transform: dict[str, str] = {}
         self._meshes_by_transform: dict[str, list[str]] = {}
         self._lights_by_transform: dict[str, list[str]] = {}
+        self._cameras_by_transform: dict[str, list[str]] = {}
         for item in transforms:
             self.add_transform(item)
         for item in meshes:
             self.add_mesh(item)
         for item in lights:
             self.add_light(item)
+        for item in cameras:
+            self.add_camera(item)
 
     @property
     def transforms(self) -> dict[str, TransformComponent]:
@@ -75,12 +83,22 @@ class SceneWorld:
         """Light UIDs parented under ``transform``."""
         return list(self._lights_by_transform.get(transform, ()))
 
+    @property
+    def cameras(self) -> dict[str, CameraComponent]:
+        """Camera UID → component."""
+        return self._cameras
+
+    def cameras_on(self, transform: str) -> list[str]:
+        """Camera UIDs parented under ``transform``."""
+        return list(self._cameras_by_transform.get(transform, ()))
+
     def used_names(self) -> set[str]:
         """All component UIDs plus outliner folder names."""
         return (
             set(self._transforms)
             | set(self._meshes)
             | set(self._lights)
+            | set(self._cameras)
             | set(FOLDER_NAMES)
         )
 
@@ -99,7 +117,7 @@ class SceneWorld:
         return f"{stem}{index}"
 
     def resolve_transform(self, name: str) -> str | None:
-        """Map a transform, mesh, or light UID to its transform UID.
+        """Map a transform, mesh, light, or camera UID to its transform UID.
 
         Args:
             name: Any scene object UID from the outliner or pick path.
@@ -110,6 +128,8 @@ class SceneWorld:
             return self._mesh_to_transform[name]
         if name in self._light_to_transform:
             return self._light_to_transform[name]
+        if name in self._camera_to_transform:
+            return self._camera_to_transform[name]
         return None
 
     def get_transform(self, name: str) -> TransformComponent | None:
@@ -159,6 +179,22 @@ class SceneWorld:
         self._lights[component.name] = component
         self._light_to_transform[component.name] = component.transform
 
+    def get_camera(self, name: str) -> CameraComponent | None:
+        """Return a camera by UID, or ``None``."""
+        return self._cameras.get(name)
+
+    def set_camera(self, component: CameraComponent) -> None:
+        """Replace a stored camera (same UID and transform link).
+
+        Args:
+            component: Updated camera snapshot.
+        """
+        if component.name not in self._cameras:
+            msg = f"camera not found: {component.name!r}"
+            raise KeyError(msg)
+        self._cameras[component.name] = component
+        self._camera_to_transform[component.name] = component.transform
+
     def add_transform(self, component: TransformComponent) -> None:
         """Insert a transform and empty shape lists.
 
@@ -171,6 +207,7 @@ class SceneWorld:
         self._transforms[component.name] = component
         self._meshes_by_transform.setdefault(component.name, [])
         self._lights_by_transform.setdefault(component.name, [])
+        self._cameras_by_transform.setdefault(component.name, [])
 
     def add_mesh(self, component: MeshComponent) -> None:
         """Insert a mesh and index it under its transform.
@@ -207,6 +244,42 @@ class SceneWorld:
         self._lights_by_transform.setdefault(component.transform, []).append(
             component.name
         )
+
+    def add_camera(self, component: CameraComponent) -> None:
+        """Insert a camera and index it under its transform.
+
+        Args:
+            component: Camera to store.
+        """
+        if component.name in self._cameras:
+            msg = f"camera already exists: {component.name!r}"
+            raise KeyError(msg)
+        if component.transform not in self._transforms:
+            msg = f"camera {component.name!r} missing transform {component.transform!r}"
+            raise KeyError(msg)
+        self._cameras[component.name] = component
+        self._camera_to_transform[component.name] = component.transform
+        self._cameras_by_transform.setdefault(component.transform, []).append(
+            component.name
+        )
+
+    def remove_camera(self, name: str) -> CameraComponent | None:
+        """Remove a camera and drop its indexes.
+
+        Args:
+            name: Camera UID.
+
+        Returns:
+            The removed component, or ``None`` when missing.
+        """
+        camera = self._cameras.pop(name, None)
+        if camera is None:
+            return None
+        self._camera_to_transform.pop(name, None)
+        under = self._cameras_by_transform.get(camera.transform)
+        if under and name in under:
+            under.remove(name)
+        return camera
 
     def remove_mesh(self, name: str) -> MeshComponent | None:
         """Remove a mesh and drop its indexes.
@@ -259,8 +332,11 @@ class SceneWorld:
             self.remove_mesh(mesh_name)
         for light_name in list(self._lights_by_transform.get(name, ())):
             self.remove_light(light_name)
+        for camera_name in list(self._cameras_by_transform.get(name, ())):
+            self.remove_camera(camera_name)
         self._meshes_by_transform.pop(name, None)
         self._lights_by_transform.pop(name, None)
+        self._cameras_by_transform.pop(name, None)
         return self._transforms.pop(name)
 
     def rename_transform(self, old_name: str, new_name: str) -> TransformComponent:
@@ -299,6 +375,15 @@ class SceneWorld:
             light = self._lights[light_name]
             self._lights[light_name] = light.model_copy(update={"transform": new_name})
             self._light_to_transform[light_name] = new_name
+        self._cameras_by_transform[new_name] = self._cameras_by_transform.pop(
+            old_name, []
+        )
+        for camera_name in self._cameras_by_transform.get(new_name, ()):
+            camera = self._cameras[camera_name]
+            self._cameras[camera_name] = camera.model_copy(
+                update={"transform": new_name}
+            )
+            self._camera_to_transform[camera_name] = new_name
         for child_name, child in list(self._transforms.items()):
             if child.parent == old_name:
                 self._transforms[child_name] = child.model_copy(
@@ -354,16 +439,20 @@ class SceneWorld:
         self._transforms.clear()
         self._meshes.clear()
         self._lights.clear()
+        self._cameras.clear()
         self._mesh_to_transform.clear()
         self._light_to_transform.clear()
+        self._camera_to_transform.clear()
         self._meshes_by_transform.clear()
         self._lights_by_transform.clear()
+        self._cameras_by_transform.clear()
 
     def replace_all(
         self,
         transforms: Iterable[TransformComponent],
         meshes: Iterable[MeshComponent],
         lights: Iterable[LightComponent],
+        cameras: Iterable[CameraComponent] = (),
     ) -> None:
         """Replace the entire world contents.
 
@@ -371,6 +460,7 @@ class SceneWorld:
             transforms: New transforms.
             meshes: New meshes.
             lights: New lights.
+            cameras: New cameras.
         """
         self.clear()
         for item in transforms:
@@ -379,6 +469,8 @@ class SceneWorld:
             self.add_mesh(item)
         for item in lights:
             self.add_light(item)
+        for item in cameras:
+            self.add_camera(item)
 
     def to_document(self) -> SceneDocument:
         """Snapshot the world as a serializable document."""
@@ -388,7 +480,12 @@ class SceneWorld:
             ],
             meshes=[item.model_copy(deep=True) for item in self._meshes.values()],
             lights=[item.model_copy(deep=True) for item in self._lights.values()],
+            cameras=[item.model_copy(deep=True) for item in self._cameras.values()],
         )
+
+    def iter_cameras(self) -> Iterator[CameraComponent]:
+        """Iterate cameras in insertion order."""
+        yield from self._cameras.values()
 
     def iter_transforms(self) -> Iterator[TransformComponent]:
         """Iterate transforms in insertion order."""

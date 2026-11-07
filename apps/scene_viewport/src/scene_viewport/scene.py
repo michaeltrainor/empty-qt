@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     TransformComponent,
 )
 
 # Folder UIDs in the outliner only — not TransformComponents.
-FOLDER_NAMES = frozenset({"world", "geo", "lgt"})
+FOLDER_NAMES = frozenset({"world", "geo", "lgt", "cam"})
 
 
 def transform_components() -> list[TransformComponent]:
@@ -47,25 +48,29 @@ def build_forest(
     transforms: Iterable[TransformComponent],
     meshes: Iterable[MeshComponent],
     lights: Iterable[LightComponent],
+    cameras: Iterable[CameraComponent] = (),
 ) -> list[list[object]]:
     """Build a forest nesting transforms by ``parent`` with shape leaves.
 
-    Light-bearing transforms sit under ``lgt``; everything else under ``geo``.
-    ``world`` / ``geo`` / ``lgt`` are outliner folders only.
+    Root transforms that carry a light sit under ``lgt``, ones that carry a
+    camera under ``cam``, and everything else under ``geo``. ``world``,
+    ``geo``, ``lgt``, and ``cam`` are outliner folders only.
     """
     transform_list = list(transforms)
     mesh_list = list(meshes)
     light_list = list(lights)
+    camera_list = list(cameras)
 
-    meshes_by_xform: dict[str, list[str]] = {}
+    shapes_by_xform: dict[str, list[str]] = {}
     for mesh in mesh_list:
-        meshes_by_xform.setdefault(mesh.transform, []).append(mesh.name)
-
-    lights_by_xform: dict[str, list[str]] = {}
+        shapes_by_xform.setdefault(mesh.transform, []).append(mesh.name)
     for light in light_list:
-        lights_by_xform.setdefault(light.transform, []).append(light.name)
+        shapes_by_xform.setdefault(light.transform, []).append(light.name)
+    for camera in camera_list:
+        shapes_by_xform.setdefault(camera.transform, []).append(camera.name)
 
     light_transforms = {light.transform for light in light_list}
+    camera_transforms = {camera.transform for camera in camera_list}
 
     by_parent: dict[str, list[TransformComponent]] = {}
     for transform in transform_list:
@@ -75,20 +80,27 @@ def build_forest(
         kids: list[object] = [
             branch(child) for child in by_parent.get(transform.name, ())
         ]
-        for shape in meshes_by_xform.get(transform.name, ()):
-            kids.append([shape])
-        for shape in lights_by_xform.get(transform.name, ()):
+        for shape in shapes_by_xform.get(transform.name, ()):
             kids.append([shape])
         return [transform.name, *kids]
 
+    def folder_of(root: TransformComponent) -> str:
+        if root.name in light_transforms:
+            return "lgt"
+        if root.name in camera_transforms:
+            return "cam"
+        return "geo"
+
     roots = by_parent.get("", ())
-    geo_nodes = [branch(root) for root in roots if root.name not in light_transforms]
-    lgt_nodes = [branch(root) for root in roots if root.name in light_transforms]
+    folders: dict[str, list[object]] = {"geo": [], "lgt": [], "cam": []}
+    for root in roots:
+        folders[folder_of(root)].append(branch(root))
     return [
         [
             "world",
-            ["geo", *geo_nodes],
-            ["lgt", *lgt_nodes],
+            ["geo", *folders["geo"]],
+            ["lgt", *folders["lgt"]],
+            ["cam", *folders["cam"]],
         ]
     ]
 

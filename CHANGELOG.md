@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Scene viewport: cameras are scene objects. Create → Cameras adds a
+  perspective or orthographic camera on a transform aimed at the scene,
+  shown as a frustum helper in a new `cam` outliner folder, with a Camera
+  tab for field of view, ortho size, and clip planes. View → Look Through
+  Camera (Ctrl+Shift+L) renders from the selected camera; orbit navigation
+  and the gizmo pause until you toggle back, frame, or pick a preset view.
+  Cameras duplicate, rename, delete, undo, save, import from glTF files,
+  and export to glTF like other shapes.
 - Scene viewport: File → Export Scene… and Export Selection… write `.glb`
   or `.gltf`. Transforms become nodes with their TRS, primitives are
   tessellated, imported meshes are re-embedded from their loaded buffers,

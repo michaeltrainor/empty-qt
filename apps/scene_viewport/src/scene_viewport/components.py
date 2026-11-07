@@ -213,3 +213,49 @@ class LightComponent(BaseModel):
         title="Cast Shadow",
         description="Enable shadow maps for this light (meshes must receive).",
     )
+
+
+CameraKind = Literal["perspective", "orthographic"]
+
+
+class CameraComponent(BaseModel):
+    """A camera shape parented under a transform.
+
+    The camera looks along its transform's -Z axis, as glTF and pygfx
+    cameras do, so aiming it means rotating the transform. Shown as the
+    Camera tab when that transform is selected; View → Look Through Camera
+    renders the viewport from it. The viewport helper draws its frustum
+    and makes it pickable.
+    """
+
+    name: str = Field(frozen=True, title="Name")
+    transform: str = Field(frozen=True, title="Transform")
+    kind: CameraKind = Field(default="perspective", frozen=True, title="Kind")
+    fov: float = Field(
+        default=50.0,
+        ge=1.0,
+        le=170.0,
+        title="Field of View",
+        description="Vertical field of view in degrees (perspective).",
+    )
+    ortho_size: float = Field(
+        default=10.0,
+        gt=0.0,
+        le=10000.0,
+        title="Ortho Size",
+        description="Visible height in scene units (orthographic).",
+    )
+    near: float = Field(
+        default=0.1,
+        gt=0.0,
+        le=1000.0,
+        title="Near",
+        description="Near clip distance.",
+    )
+    far: float = Field(
+        default=500.0,
+        gt=0.0,
+        le=100000.0,
+        title="Far",
+        description="Far clip distance.",
+    )

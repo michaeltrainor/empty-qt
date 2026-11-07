@@ -15,6 +15,58 @@ def as_vec3(value: object) -> Vec3:
     return (float(array[0]), float(array[1]), float(array[2]))
 
 
+def look_at_matrix(
+    position: Vec3,
+    target: Vec3,
+    up: Vec3 = (0.0, 1.0, 0.0),
+) -> np.ndarray:
+    """Build a 4x4 world matrix at ``position`` whose -Z axis points at ``target``.
+
+    This is the camera and light convention in glTF and pygfx. When the
+    view direction is parallel to ``up``, +Z is used as the up hint.
+
+    Args:
+        position: World position of the node.
+        target: World point to look at.
+        up: Preferred up direction.
+
+    Returns:
+        A rotation-and-translation matrix (no scale).
+    """
+    eye = np.asarray(position, dtype=np.float64)
+    forward = np.asarray(target, dtype=np.float64) - eye
+    length = float(np.linalg.norm(forward))
+    forward = np.array([0.0, 0.0, -1.0]) if length < 1e-9 else forward / length
+    up_vector = np.asarray(up, dtype=np.float64)
+    if abs(float(np.dot(forward, up_vector))) > 0.999:
+        up_vector = np.array([0.0, 0.0, 1.0])
+    # Right-handed frame with +Z pointing back along the view direction.
+    z_axis = -forward
+    x_axis = np.cross(up_vector, z_axis)
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(z_axis, x_axis)
+    matrix = np.eye(4)
+    matrix[:3, 0] = x_axis
+    matrix[:3, 1] = y_axis
+    matrix[:3, 2] = z_axis
+    matrix[:3, 3] = eye
+    return matrix
+
+
+def look_at_trs(position: Vec3, target: Vec3, up: Vec3 = (0.0, 1.0, 0.0)) -> Trs:
+    """Return TRS for a node at ``position`` looking at ``target``.
+
+    Args:
+        position: World position of the node.
+        target: World point to look at.
+        up: Preferred up direction.
+
+    Returns:
+        ``(position, euler XYZ radians, scale)`` with unit scale.
+    """
+    return trs_from_mat(look_at_matrix(position, target, up))
+
+
 def mat_from_trs(
     position: Vec3,
     rotation_euler: Vec3,

@@ -20,14 +20,19 @@ from PIL import Image
 from trimesh.visual import ColorVisuals, TextureVisuals
 from trimesh.visual.material import PBRMaterial
 
-from scene_viewport.components import LightComponent, MapKind, MeshComponent
+from scene_viewport.components import (
+    CameraComponent,
+    LightComponent,
+    MapKind,
+    MeshComponent,
+)
 from scene_viewport.mesh.gltf_extras import join_glb, split_glb
 from scene_viewport.mesh.importer import ImportedMaps, MaterialSurface, ModelImportError
 from scene_viewport.mesh.primitives import box, plane, uv_sphere
 from scene_viewport.mesh.types import MeshBuffers
 from scene_viewport.textures import file_material
 from scene_viewport.world import SceneWorld
-from scene_viewport.xform_math import mat_from_trs
+from scene_viewport.xform_math import look_at_matrix, mat_from_trs
 
 #: glTF spot cone half-angle when the light has none of its own (pygfx default).
 _SPOT_OUTER_ANGLE = math.pi / 3
@@ -53,6 +58,7 @@ class ExportResult:
         transforms: Transform nodes written.
         meshes: Meshes written.
         lights: Lights written.
+        cameras: Cameras written.
         warnings: Things left out or approximated.
     """
 
@@ -60,6 +66,7 @@ class ExportResult:
     transforms: int = 0
     meshes: int = 0
     lights: int = 0
+    cameras: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -110,6 +117,8 @@ def export_scene(
     world_matrices = _world_matrices(world)
     light_nodes: dict[str, int] = {}
     lights_json: list[dict[str, object]] = []
+    camera_nodes: dict[str, int] = {}
+    cameras_json: list[dict[str, object]] = []
     unlit_materials: set[str] = set()
     for name in names:
         transform = world.transforms[name]
@@ -165,9 +174,29 @@ def export_scene(
             light_nodes[node] = len(lights_json)
             lights_json.append(_light_json(light))
             result.lights += 1
+        for index, camera_name in enumerate(world.cameras_on(name)):
+            camera = world.cameras.get(camera_name)
+            if camera is None:
+                continue
+            # A camera looks along its node's -Z, as the transform does, so
+            # the first camera rides the transform node itself.
+            node = name
+            if index > 0:
+                node = camera_name
+                scene.graph.update(frame_to=node, frame_from=name, matrix=np.eye(4))
+            camera_nodes[node] = len(cameras_json)
+            cameras_json.append(_camera_json(camera))
+            result.cameras += 1
 
     document, binary, buffers = _export_trimesh(scene, suffix)
-    _patch_document(document, light_nodes, lights_json, unlit_materials)
+    _patch_document(
+        document,
+        light_nodes,
+        lights_json,
+        unlit_materials,
+        camera_nodes,
+        cameras_json,
+    )
     if suffix == ".glb":
         path.write_bytes(join_glb(document, binary))
     else:
@@ -355,23 +384,13 @@ def _aim_matrix(
     if light.kind == "point":
         return np.eye(4)
     position = transform_world[:3, 3]
-    forward = -position
-    length = float(np.linalg.norm(forward))
-    if length < 1e-9:
+    if float(np.linalg.norm(position)) < 1e-9:
         return np.eye(4)
-    forward = forward / length
-    up = np.array([0.0, 1.0, 0.0])
-    if abs(float(np.dot(forward, up))) > 0.999:
-        up = np.array([0.0, 0.0, 1.0])
-    right = np.cross(up, forward)
-    right /= np.linalg.norm(right)
-    true_up = np.cross(forward, right)
-    world = np.eye(4)
-    # glTF lights shine along -Z, so -Z of the node is ``forward``.
-    world[:3, 0] = right
-    world[:3, 1] = true_up
-    world[:3, 2] = -forward
-    world[:3, 3] = position
+    # glTF lights shine along -Z; look_at_matrix points -Z at the origin.
+    world = look_at_matrix(
+        (float(position[0]), float(position[1]), float(position[2])),
+        (0.0, 0.0, 0.0),
+    )
     parent_inverse = np.linalg.inv(transform_world)
     return parent_inverse @ world
 
@@ -419,15 +438,46 @@ def _export_trimesh(
     return document, None, buffers
 
 
+def _camera_json(camera: CameraComponent) -> dict[str, object]:
+    if camera.kind == "orthographic":
+        half = camera.ortho_size * 0.5
+        return {
+            "name": camera.name,
+            "type": "orthographic",
+            "orthographic": {
+                "xmag": half * 16 / 9,
+                "ymag": half,
+                "znear": camera.near,
+                "zfar": camera.far,
+            },
+        }
+    return {
+        "name": camera.name,
+        "type": "perspective",
+        "perspective": {
+            "yfov": math.radians(camera.fov),
+            "znear": camera.near,
+            "zfar": camera.far,
+        },
+    }
+
+
 def _patch_document(
     document: dict[str, object],
     light_nodes: dict[str, int],
     lights: list[dict[str, object]],
     unlit_materials: set[str],
+    camera_nodes: dict[str, int] | None = None,
+    cameras: list[dict[str, object]] | None = None,
 ) -> None:
-    """Add the extensions trimesh doesn't write."""
+    """Add what trimesh doesn't write: lights, unlit materials, cameras."""
     used: list[str] = []
     nodes = document.get("nodes")
+    if cameras and camera_nodes and isinstance(nodes, list):
+        document["cameras"] = cameras
+        for node in nodes:
+            if isinstance(node, dict) and node.get("name") in camera_nodes:
+                node["camera"] = camera_nodes[str(node["name"])]
     if lights and isinstance(nodes, list):
         used.append("KHR_lights_punctual")
         extensions = document.setdefault("extensions", {})

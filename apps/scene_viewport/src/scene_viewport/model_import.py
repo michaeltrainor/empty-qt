@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     Space,
@@ -145,7 +147,7 @@ def import_objects(
     meshes: list[MeshComponent] = []
 
     single = _single_mesh_node(model)
-    if single is not None and not model.lights:
+    if single is not None and not model.lights and not model.cameras:
         position, rotation, scale = trs_from_mat(convert @ single.matrix)
         transforms.append(
             TransformComponent(
@@ -190,11 +192,62 @@ def import_objects(
         if node.mesh:
             meshes.append(_mesh(model, node, name, claim))
     lights, warnings = _lights(model, names, transforms, world_matrices, claim)
+    cameras = _cameras(model, names, transforms, root, space, claim)
     return ImportResult(
         root,
-        SceneObjects(transforms=transforms, meshes=meshes, lights=lights),
+        SceneObjects(
+            transforms=transforms, meshes=meshes, lights=lights, cameras=cameras
+        ),
         warnings=tuple(warnings),
     )
+
+
+def _cameras(
+    model: ImportedModel,
+    names: dict[str, str],
+    transforms: list[TransformComponent],
+    root: str,
+    space: Space,
+    claim: Callable[[str], str],
+) -> list[CameraComponent]:
+    """Turn the file's cameras into camera shapes on their nodes.
+
+    glTF cameras look along their node's -Z, as ours do, so the node's
+    transform carries the aim unchanged. trimesh drops camera nodes from
+    its graph, so a node that didn't come through is rebuilt here from the
+    glTF JSON, under its parent or the file root.
+    """
+    cameras: list[CameraComponent] = []
+    for camera in model.cameras:
+        transform_name = names.get(camera.node)
+        if transform_name is None:
+            transform_name = claim(safe_name(camera.node))
+            names[camera.node] = transform_name
+            position, rotation, scale = trs_from_mat(camera.matrix)
+            transforms.append(
+                TransformComponent(
+                    name=transform_name,
+                    parent=names.get(camera.parent, root),
+                    space=space,
+                    position=position,
+                    rotation=rotation,
+                    scale=scale,
+                )
+            )
+        near = min(max(camera.znear, 1e-4), 1000.0)
+        far = camera.zfar if camera.zfar > near else max(near * 5000.0, 500.0)
+        cameras.append(
+            CameraComponent(
+                name=claim(f"{transform_name}Shape"),
+                transform=transform_name,
+                kind="orthographic" if camera.kind == "orthographic" else "perspective",
+                fov=min(max(math.degrees(camera.yfov), 1.0), 170.0),
+                ortho_size=min(max(camera.ymag * 2.0, 1e-3), 10000.0),
+                near=near,
+                far=min(far, 100000.0),
+            )
+        )
+    return cameras
 
 
 #: Distance from the origin at which an imported directional light is placed.
