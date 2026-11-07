@@ -23,6 +23,7 @@ from scene_viewport.mesh.importer import load_model  # noqa: E402
 from scene_viewport.mesh.references import (  # noqa: E402
     reference_problems,
     referenced_files,
+    remote_references,
     source_signature,
 )
 from scene_viewport.textures import file_maps, texture_from_rgba  # noqa: E402
@@ -62,7 +63,13 @@ def _host() -> SimpleNamespace:
     """Stand-in ``self`` for the viewport's texture lookups (no GPU window)."""
     host = SimpleNamespace(_albedo_cache={}, _albedo_stamps={})
     host._file_texture = functools.partial(ViewportController._file_texture, host)
+    host._file_maps = functools.partial(ViewportController._file_maps, host)
     return host
+
+
+def _maps(component: MeshComponent) -> object:
+    """The images the viewport reads once per material build."""
+    return file_maps(component.source, component.source_mesh)
 
 
 def test_gltf_base_color_texture_is_read_top_row_first(tmp_path: Path) -> None:
@@ -147,14 +154,15 @@ def test_albedo_map_overrides_the_file_texture(tmp_path: Path) -> None:
     imported = MeshComponent(
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
-    texture = ViewportController._albedo_texture(host, imported)  # type: ignore[arg-type]
+    maps = _maps(imported)
+    texture = ViewportController._albedo_texture(host, imported, maps)  # type: ignore[arg-type]
     assert texture is not None
     # Cached: the same texture object on the next draw-mode change.
-    assert ViewportController._albedo_texture(host, imported) is texture  # type: ignore[arg-type]
+    assert ViewportController._albedo_texture(host, imported, maps) is texture  # type: ignore[arg-type]
     swatch = tmp_path / "swatch.png"
     Image.new("RGBA", (2, 2), (9, 9, 9, 255)).save(swatch)
     override = imported.model_copy(update={"albedo_map": swatch})
-    other = ViewportController._albedo_texture(host, override)  # type: ignore[arg-type]
+    other = ViewportController._albedo_texture(host, override, maps)  # type: ignore[arg-type]
     assert other is not None
     assert other is not texture
     assert np.asarray(other.data)[0, 0].tolist() == [9, 9, 9, 255]
@@ -162,7 +170,7 @@ def test_albedo_map_overrides_the_file_texture(tmp_path: Path) -> None:
     assert str(swatch) in host._albedo_stamps
     # Primitives without an albedo map stay untextured.
     box = MeshComponent(name="boxShape", transform="box", kind="box")
-    assert ViewportController._albedo_texture(host, box) is None  # type: ignore[arg-type]
+    assert ViewportController._albedo_texture(host, box, None) is None  # type: ignore[arg-type]
 
 
 def test_imported_maps_go_on_the_textured_material(tmp_path: Path) -> None:
@@ -180,7 +188,7 @@ def test_imported_maps_go_on_the_textured_material(tmp_path: Path) -> None:
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
     target = pygfx.MeshStandardMaterial()
-    ViewportController._apply_file_maps(host, target, component)  # type: ignore[arg-type]
+    ViewportController._apply_file_maps(host, target, component, _maps(component))  # type: ignore[arg-type]
     assert target.roughness_map is not None
     assert target.metalness_map is not None
     assert target.roughness_map.texture is target.metalness_map.texture
@@ -198,7 +206,7 @@ def test_black_emissive_factor_leaves_emission_off(tmp_path: Path) -> None:
         name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
     )
     target = pygfx.MeshStandardMaterial()
-    ViewportController._apply_file_maps(_host(), target, component)  # type: ignore[arg-type]
+    ViewportController._apply_file_maps(_host(), target, component, _maps(component))  # type: ignore[arg-type]
     assert target.emissive_map is None
 
 
@@ -295,3 +303,92 @@ def test_normal_mapped_meshes_get_tangents_on_their_geometry(tmp_path: Path) -> 
         assert (model.meshes[key].tangents is not None) is expected
         geometry = file_geometry(path, key)
         assert (getattr(geometry, "tangents", None) is not None) is expected
+
+
+def _touch_later(file: Path) -> None:
+    """Bump the mtime so a rewrite in the same second still counts as an edit."""
+    stat = file.stat()
+    os.utime(file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+
+def test_edited_mtl_is_rescanned_without_touching_the_obj(tmp_path: Path) -> None:
+    """A texture added to the .mtl is tracked and reloads the model."""
+    path = _obj_with_texture(tmp_path)
+    library = referenced_files(path)[0]
+    assert library.suffix == ".mtl"
+    before = source_signature(path)
+    first = load_model(path)
+    _quadrants().save(tmp_path / "rough.png")
+    library.write_text(
+        library.read_text(encoding="utf-8") + "\nmap_Ns rough.png\n", encoding="utf-8"
+    )
+    _touch_later(library)
+    names = [file.name for file in referenced_files(path)]
+    assert "rough.png" in names
+    assert source_signature(path) != before
+    assert load_model(path) is not first
+    # Editing the new texture now counts as an edit too.
+    after = source_signature(path)
+    _touch_later(tmp_path / "rough.png")
+    assert source_signature(path) != after
+
+
+def test_obj_material_names_with_spaces_and_several_libraries(tmp_path: Path) -> None:
+    (tmp_path / "my paint.mtl").write_text(
+        "newmtl a\n"
+        "map_Kd -bm 1 -o 0 0.5 base color.png\n"
+        "map_Ns -blendu on -s 1 1 1 rough.png\n"
+        "bump -imfchan r bump map.png\n"
+        "norm normal.png\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "second.mtl").write_text(
+        "newmtl b\nmap_Kd other.png\n", encoding="utf-8"
+    )
+    (tmp_path / "third.mtl").write_text("newmtl c\n", encoding="utf-8")
+    obj = tmp_path / "quad.obj"
+    obj.write_text(
+        "mtllib my paint.mtl\n"
+        "mtllib second.mtl third.mtl\n"
+        "mtllib missing.mtl\n"
+        "v 0 0 0\n",
+        encoding="utf-8",
+    )
+    names = [file.name for file in referenced_files(obj)]
+    assert names == [
+        "my paint.mtl",
+        "second.mtl",
+        "third.mtl",
+        "missing.mtl",
+        "base color.png",
+        "rough.png",
+        "bump map.png",
+        "normal.png",
+        "other.png",
+    ]
+
+
+def test_remote_gltf_uris_are_reported_as_remote_not_missing(tmp_path: Path) -> None:
+    document = {
+        "asset": {"version": "2.0"},
+        "buffers": [{"uri": "data.bin", "byteLength": 0}],
+        "images": [
+            {"uri": "https://example.com/paint.png"},
+            {"uri": "HTTP://example.com/paint.png"},
+            {"uri": "local.png"},
+        ],
+    }
+    gltf = tmp_path / "scene.gltf"
+    gltf.write_text(json.dumps(document), encoding="utf-8")
+    (tmp_path / "data.bin").write_bytes(b"")
+    _quadrants().save(tmp_path / "local.png")
+    assert [f.name for f in referenced_files(gltf)] == ["data.bin", "local.png"]
+    assert remote_references(gltf) == (
+        "https://example.com/paint.png",
+        "HTTP://example.com/paint.png",
+    )
+    assert reference_problems(gltf) == [
+        "scene.gltf: remote file not loaded https://example.com/paint.png",
+        "scene.gltf: remote file not loaded HTTP://example.com/paint.png",
+    ]
+    assert remote_references(tmp_path / "missing.gltf") == ()

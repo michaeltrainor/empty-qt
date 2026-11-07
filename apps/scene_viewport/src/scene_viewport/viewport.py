@@ -35,7 +35,7 @@ from scene_viewport.gizmo import (
     MayaTransformGizmo,
 )
 from scene_viewport.mesh.geometry import file_geometry, geometry_for
-from scene_viewport.mesh.importer import ModelImportError
+from scene_viewport.mesh.importer import ImportedMaps, ModelImportError
 from scene_viewport.mesh.references import (
     FileStamp,
     file_stamp,
@@ -382,11 +382,25 @@ class ViewportController:
         for outline in self._outlines.values():
             _material_of(outline, gfx.MeshBasicMaterial).wireframe_thickness = thickness
 
-    def _albedo_texture(self, component: MeshComponent) -> gfx.Texture | None:
+    def _file_maps(self, component: MeshComponent) -> ImportedMaps | None:
+        """Return the images of a ``file`` mesh, reading its model file once.
+
+        Called once per material build, so the file is stamped once rather
+        than once per map.
+        """
+        if component.kind != "file":
+            return None
+        return file_maps(component.source, component.source_mesh)
+
+    def _albedo_texture(
+        self,
+        component: MeshComponent,
+        maps: ImportedMaps | None,
+    ) -> gfx.Texture | None:
         """Return a cached albedo texture for ``component``, if any.
 
         ``albedo_map`` wins; an imported mesh without one uses its file's
-        base color texture.
+        base color texture from ``maps``.
         """
         key = str(component.albedo_map).strip()
         if key and key != ".":
@@ -394,19 +408,19 @@ class ViewportController:
                 self._albedo_cache[key] = load_albedo_texture(component.albedo_map)
                 self._albedo_stamps[key] = file_stamp(component.albedo_map)
             return self._albedo_cache[key]
-        return self._file_texture(component, "base_color")
+        return self._file_texture(component, "base_color", maps)
 
     def _file_texture(
         self,
         component: MeshComponent,
         kind: MapKind,
+        maps: ImportedMaps | None,
     ) -> gfx.Texture | None:
-        """Return a cached texture of ``kind`` from a ``file`` mesh's source."""
+        """Return a cached texture of ``kind`` from a ``file`` mesh's ``maps``."""
         if component.kind != "file":
             return None
         key = f"{component.source}#{component.source_mesh}#{kind}"
         if key not in self._albedo_cache:
-            maps = file_maps(component.source, component.source_mesh)
             pixels = getattr(maps, kind) if maps is not None else None
             self._albedo_cache[key] = (
                 texture_from_rgba(pixels, color=kind in _COLOR_MAPS)
@@ -430,29 +444,30 @@ class ViewportController:
             pick_write=True,
         )
         if textured:
-            texture = self._albedo_texture(component)
+            maps = self._file_maps(component)
+            texture = self._albedo_texture(component, maps)
             if texture is not None:
                 material.map = gfx.TextureMap(texture)
-            self._apply_file_maps(material, component)
+            self._apply_file_maps(material, component, maps)
         return material
 
     def _apply_file_maps(
         self,
         material: gfx.MeshStandardMaterial,
         component: MeshComponent,
+        maps: ImportedMaps | None,
     ) -> None:
         """Add an imported mesh's roughness/metal, normal, and emissive maps."""
-        packed = self._file_texture(component, "metallic_roughness")
+        packed = self._file_texture(component, "metallic_roughness", maps)
         if packed is not None:
             # glTF packs roughness in green and metalness in blue, the
             # channels pygfx samples for each map.
             material.roughness_map = gfx.TextureMap(packed)
             material.metalness_map = gfx.TextureMap(packed)
-        normal = self._file_texture(component, "normal")
+        normal = self._file_texture(component, "normal", maps)
         if normal is not None:
             material.normal_map = gfx.TextureMap(normal)
-        emissive = self._file_texture(component, "emissive")
-        maps = file_maps(component.source, component.source_mesh)
+        emissive = self._file_texture(component, "emissive", maps)
         if emissive is not None and maps is not None and any(maps.emissive_factor):
             material.emissive_map = gfx.TextureMap(emissive)
             # glTF factors are linear; pygfx colors are sRGB.
