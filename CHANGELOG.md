@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Scene viewport: the scene store is now backed by a live OpenUSD stage.
+  Every edit (create, delete, move, rename, reparent, reorder, Mesh tab,
+  Light tab, Camera tab, clips) authors the matching prim on an in-memory
+  `Usd.Stage` through the same mapping the USD files use, so the stage
+  always mirrors what the outliner shows. Clips are muted sublayers. No
+  visible change yet; this is the ground for a viewport that draws from
+  the stage. Opening a scene takes slightly longer for imported meshes,
+  whose triangles are embedded in the stage.
 - Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
   `.usd`) next to JSON. Transforms, primitives, imported meshes (with
   their triangles embedded for other tools), Mesh tab materials as
