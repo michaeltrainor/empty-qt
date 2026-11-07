@@ -6,7 +6,8 @@ surface extensions, each texture's ``texCoord`` set, sampler wrap modes,
 ``KHR_texture_transform``, a second UV set, or vertex colors on textured
 meshes. :class:`GltfDocument` reads those straight from the glTF JSON and
 buffers, keyed by the geometry names trimesh assigns, so the importer can
-attach them to the right mesh.
+attach them to the right mesh. trimesh also drops ``animations``; those
+are read here per node name, so the importer can retarget them.
 """
 
 from __future__ import annotations
@@ -817,3 +818,136 @@ def read_lights(document: GltfDocument) -> list[ImportedLight]:
             )
         )
     return lights
+
+
+#: glTF ``target.path`` values that animate a node's TRS.
+_CHANNEL_PATHS = frozenset({"translation", "rotation", "scale"})
+#: glTF sampler interpolation names → our lower-case spelling.
+_INTERPOLATIONS = {"STEP": "step", "LINEAR": "linear", "CUBICSPLINE": "cubicspline"}
+
+
+@dataclass(frozen=True, slots=True)
+class ImportedChannel:
+    """One animated TRS property of one node.
+
+    Args:
+        node: trimesh node name the channel animates.
+        path: ``translation``, ``rotation``, or ``scale``.
+        interpolation: ``step``, ``linear``, or ``cubicspline``.
+        times: Key times in seconds, strictly increasing, shape ``(n,)``.
+        values: Key values, shape ``(n, 3)`` (``(n, 4)`` xyzw quaternions
+            for ``rotation``). ``cubicspline`` keeps glTF's layout of three
+            rows per key: in-tangent, value, out-tangent, so ``(3n, c)``.
+    """
+
+    node: str
+    path: str
+    interpolation: str
+    times: NDArray[np.float32]
+    values: NDArray[np.float32]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportedAnimation:
+    """One glTF animation: the node channels read, and what was skipped.
+
+    Args:
+        name: The animation's ``name``, or ``animation_<index>``.
+        channels: TRS channels in file order.
+        skipped: Reasons channels were left out, each once, such as
+            ``morph target weights`` or ``KHR_animation_pointer targets``.
+    """
+
+    name: str
+    channels: tuple[ImportedChannel, ...] = ()
+    skipped: tuple[str, ...] = ()
+
+
+def read_animations(document: GltfDocument) -> list[ImportedAnimation]:
+    """Return the file's animations, with channels keyed by trimesh node name.
+
+    Only ``translation``, ``rotation``, and ``scale`` channels are read.
+    ``weights`` (morph targets) and ``KHR_animation_pointer`` targets, and
+    channels whose keyframe data is missing or malformed, are skipped and
+    named in :attr:`ImportedAnimation.skipped`.
+
+    Args:
+        document: An open glTF document.
+    """
+    names = _node_names(document)
+    result: list[ImportedAnimation] = []
+    for index, animation in enumerate(document.entries("animations")):
+        raw_name = animation.get("name")
+        name = f"animation_{index}"
+        if isinstance(raw_name, str) and raw_name:
+            name = raw_name
+        raw_samplers = animation.get("samplers")
+        samplers: list[object] = raw_samplers if isinstance(raw_samplers, list) else []
+        raw_channels = animation.get("channels")
+        channels: list[ImportedChannel] = []
+        skipped: list[str] = []
+        for channel in raw_channels if isinstance(raw_channels, list) else []:
+            if not isinstance(channel, dict):
+                continue
+            target = channel.get("target")
+            target = target if isinstance(target, dict) else {}
+            path = target.get("path")
+            target_extensions = target.get("extensions")
+            if path == "pointer" or (
+                isinstance(target_extensions, dict)
+                and "KHR_animation_pointer" in target_extensions
+            ):
+                skipped.append("KHR_animation_pointer targets")
+                continue
+            if path == "weights":
+                skipped.append("morph target weights")
+                continue
+            if path not in _CHANNEL_PATHS:
+                skipped.append(f"{path} targets")
+                continue
+            node_index = target.get("node")
+            if not isinstance(node_index, int) or not 0 <= node_index < len(names):
+                skipped.append("channels without a node")
+                continue
+            sampler_index = _int(channel.get("sampler"), -1)
+            sampler: object = {}
+            if 0 <= sampler_index < len(samplers):
+                sampler = samplers[sampler_index]
+            sampler = sampler if isinstance(sampler, dict) else {}
+            mode = str(sampler.get("interpolation", "LINEAR"))
+            interpolation = _INTERPOLATIONS.get(mode)
+            if interpolation is None:
+                skipped.append(f"{mode} interpolation")
+                continue
+            times = document.accessor_array(_int(sampler.get("input"), -1))
+            values = document.accessor_array(_int(sampler.get("output"), -1))
+            if times is None or values is None:
+                skipped.append("unreadable keyframe data")
+                continue
+            times = times.reshape(-1)
+            count = len(times)
+            components = 4 if path == "rotation" else 3
+            rows = count * 3 if interpolation == "cubicspline" else count
+            if count == 0 or values.shape != (rows, components):
+                skipped.append("mismatched keyframe data")
+                continue
+            if count > 1 and bool(np.any(np.diff(times) <= 0.0)):
+                skipped.append("keyframe times out of order")
+                continue
+            channels.append(
+                ImportedChannel(
+                    node=names[node_index],
+                    path=str(path),
+                    interpolation=interpolation,
+                    times=np.ascontiguousarray(times, dtype=np.float32),
+                    values=np.ascontiguousarray(values, dtype=np.float32),
+                )
+            )
+        result.append(
+            ImportedAnimation(
+                name=name,
+                channels=tuple(channels),
+                skipped=tuple(dict.fromkeys(skipped)),
+            )
+        )
+    return result

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -815,15 +815,48 @@ class ViewportController:
 
     def apply_transform_local(self, component: TransformComponent) -> None:
         """Push **local** TRS, pivot, and visibility from ``component``."""
-        group = self._groups.get(component.name)
-        if group is None:
-            return
-        self._apply_local(group, component)
-        self._pivots[component.name] = component.pivot
-        group.visible = component.visible
-        if not self._drag_active:
-            self.refresh_shadows_for_transforms([component.name])
+        self.apply_transforms_local([component])
+
+    def apply_transforms_local(self, components: Iterable[TransformComponent]) -> None:
+        """Push **local** TRS, pivot, and visibility for several transforms.
+
+        One shadow refresh, gizmo sync, and redraw for the whole batch, so
+        animation playback can pose many transforms per tick.
+
+        Args:
+            components: Transforms to apply; unknown names are skipped.
+        """
+        names: list[str] = []
+        for component in components:
+            group = self._groups.get(component.name)
+            if group is None:
+                continue
+            self._apply_local(group, component)
+            self._pivots[component.name] = component.pivot
+            names.append(component.name)
+        if names and not self._drag_active:
+            self.refresh_shadows_for_transforms(names)
             self._sync_gizmo_target()
+        self._canvas.request_draw()
+
+    def rebase_drag(self) -> None:
+        """Re-anchor the running gizmo drag on where the objects are now.
+
+        Call after moving the selected objects from outside during a drag,
+        such as restoring an animation rest pose: the offsets measured when
+        the drag began are rebuilt from the current matrices, and the
+        proxy's delta so far is applied again on top of them.
+        """
+        if not self._drag_active:
+            return
+        self._drag_active = False
+        self._drag_rels.clear()
+        self._ensure_drag_started()
+        proxy = np.asarray(self._manip_proxy.world.matrix, dtype=np.float64)
+        for name, rel in self._drag_rels.items():
+            group = self._groups.get(name)
+            if group is not None:
+                group.world.matrix = proxy @ rel
         self._canvas.request_draw()
 
     def set_visible(self, name: str, visible: bool) -> None:

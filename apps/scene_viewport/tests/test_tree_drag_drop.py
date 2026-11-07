@@ -60,6 +60,7 @@ def _window(qtbot, world: SceneWorld) -> SimpleNamespace:
         _viewport=SimpleNamespace(reparent_transform=reparent_transform),
         reparent_calls=calls,
         rebuilds=[],
+        _stop_playback_for_edit=lambda names: False,
     )
     ns._snapshot_transform = lambda name: SceneViewportWindow._snapshot_transform(
         ns, name

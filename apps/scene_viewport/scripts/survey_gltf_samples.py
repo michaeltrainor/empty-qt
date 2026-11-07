@@ -59,6 +59,9 @@ class Survey:
     textured: int = 0
     seconds: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    clips: int = 0
+    channels: int = 0
+    skipped_clips: int = 0
 
 
 def _glb_json(path: Path) -> object:
@@ -214,7 +217,10 @@ def survey_model(folder: Path, variants: tuple[str, ...]) -> Survey:
     try:
         model = load_model(file)
         imported = import_objects(
-            model, set(), conversion=import_conversion(file, "auto", "auto")
+            model,
+            set(),
+            conversion=import_conversion(file, "auto", "auto"),
+            clip_names=set(),
         )
     except ModelImportError as exc:
         result.status = "fail"
@@ -227,7 +233,10 @@ def survey_model(folder: Path, variants: tuple[str, ...]) -> Survey:
         result.nodes = len(imported.objects.transforms)
         result.meshes = len(imported.objects.meshes)
         result.textured = len(model.maps)
-        result.warnings = list(model.warnings)
+        result.warnings = list(model.warnings) + list(imported.warnings)
+        result.clips = len(imported.objects.animations)
+        result.channels = sum(len(c.channels) for c in imported.objects.animations)
+        result.skipped_clips = sum("animation" in w for w in imported.warnings)
     result.seconds = time.perf_counter() - started
     return result
 
@@ -266,9 +275,9 @@ def write_report(results: list[Survey], out: Path, models_dir: Path) -> None:
         "",
         "## Models",
         "",
-        "| Model | Tags | Variant | Status | Nodes/meshes/textured | Time | Features "
-        "| Detail |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Model | Tags | Variant | Status | Nodes/meshes/textured | Clips (channels) "
+        "| Time | Features | Detail |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for result in sorted(results, key=lambda r: (r.status != "ok", r.name.lower())):
         features = ", ".join(result.features)
@@ -277,9 +286,31 @@ def write_report(results: list[Survey], out: Path, models_dir: Path) -> None:
         lines.append(
             f"| {result.name} | {', '.join(result.tags)} | {result.variant} | "
             f"{result.status} | {result.nodes}/{result.meshes}/{result.textured} | "
-            f"{result.seconds:.1f}s | {features} | {detail} |"
+            f"{_clips(result)} | {result.seconds:.1f}s | {features} | {detail} |"
         )
+    animated = [r for r in results if r.clips or r.skipped_clips]
+    lines += [
+        "",
+        "## Animation",
+        "",
+        f"{sum(r.clips for r in animated)} clips with "
+        f"{sum(r.channels for r in animated)} node channels read from "
+        f"{sum(1 for r in animated if r.clips)} models; "
+        f"{sum(r.skipped_clips for r in animated)} clips in "
+        f"{sum(1 for r in animated if r.skipped_clips)} models had channels skipped "
+        "(morph weights, animation pointers, or nodes not imported).",
+    ]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _clips(result: Survey) -> str:
+    """Format the clip column: clips read, channels, and clips with skips."""
+    if not result.clips and not result.skipped_clips:
+        return ""
+    text = f"{result.clips} ({result.channels})"
+    if result.skipped_clips:
+        text += f", {result.skipped_clips} partly skipped"
+    return text
 
 
 def main(argv: list[str] | None = None) -> int:

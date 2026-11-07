@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from scene_viewport.animation import AnimationClip
 from scene_viewport.components import (
     CameraComponent,
     LightComponent,
@@ -14,12 +15,19 @@ from scene_viewport.components import (
 
 @dataclass
 class SceneObjects:
-    """A bag of components involved in a create or delete step."""
+    """A bag of components involved in a create or delete step.
+
+    ``animations`` holds whole clips as they were before the step: the
+    clips an import added, or every clip that animated a deleted
+    transform. Restoring puts those clips back as they were; removing the
+    transforms again drops their channels, and a clip left empty with them.
+    """
 
     transforms: list[TransformComponent] = field(default_factory=list)
     meshes: list[MeshComponent] = field(default_factory=list)
     lights: list[LightComponent] = field(default_factory=list)
     cameras: list[CameraComponent] = field(default_factory=list)
+    animations: list[AnimationClip] = field(default_factory=list)
 
 
 @dataclass

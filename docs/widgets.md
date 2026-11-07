@@ -143,6 +143,23 @@ tree.nodesMoved.connect(lambda names, parent, row: print(names, "->", parent, ro
 
 The scene viewport uses this to reparent transforms while keeping their world pose, records one undo step per drop, and rebuilds the tree from its own store afterwards.
 
+## Timeline bar
+
+`TimelineBar` is a row of transport controls for clip playback: play / pause, stop, loop, a clip combo box, a scrub slider, a time readout, and a speed box (0.25x to 2x by default). It knows nothing about what it plays. The host fills the clip list and keeps the duration and time current; the bar emits `playToggled(bool)`, `stopRequested()`, `loopToggled(bool)`, `speedChanged(float)`, `clipChanged(str)`, and `timeScrubbed(float)` for the user's actions only. The setters never emit, so `set_time` can run on every playback tick, and it leaves the slider handle alone while the user is dragging it. With no clips the controls are disabled; hosts usually hide the bar then.
+
+```python
+from mtqt import TimelineBar
+
+bar = TimelineBar(parent=window)
+bar.set_clips(["Walk", "Run"])
+bar.set_duration(4.0)
+bar.playToggled.connect(player.set_playing)
+bar.timeScrubbed.connect(player.seek)
+timer.timeout.connect(lambda: bar.set_time(player.time))
+```
+
+The scene viewport shows one under the viewport when the scene has animation clips.
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.

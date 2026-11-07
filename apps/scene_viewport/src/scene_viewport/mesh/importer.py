@@ -20,11 +20,13 @@ from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
 from scene_viewport.mesh.gltf_extras import (
     GltfDocument,
+    ImportedAnimation,
     ImportedCamera,
     ImportedLight,
     MapSampling,
     PrimitiveExtras,
     SurfaceExtensions,
+    read_animations,
     read_cameras,
     read_lights,
 )
@@ -220,6 +222,7 @@ class ImportedModel:
             file that is missing or unreadable.
         lights: ``KHR_lights_punctual`` lights, each naming its node.
         cameras: glTF cameras, each naming its node.
+        animations: glTF animations, each channel naming its node.
     """
 
     path: Path
@@ -230,6 +233,7 @@ class ImportedModel:
     warnings: tuple[str, ...] = ()
     lights: tuple[ImportedLight, ...] = ()
     cameras: tuple[ImportedCamera, ...] = ()
+    animations: tuple[ImportedAnimation, ...] = ()
 
 
 def is_importable(path: Path) -> bool:
@@ -359,6 +363,11 @@ def _parse(path: Path) -> ImportedModel:
     if not meshes:
         msg = f"{path.name} has no triangle meshes"
         raise ModelImportError(msg)
+    if document is not None and document.entries("skins"):
+        warnings.append(
+            f"{path.name}: skins are not supported; skinned meshes keep their "
+            "rest shape while their joints animate"
+        )
 
     return ImportedModel(
         path=path,
@@ -369,6 +378,7 @@ def _parse(path: Path) -> ImportedModel:
         warnings=(*reference_problems(path), *warnings),
         lights=tuple(read_lights(document)) if document is not None else (),
         cameras=tuple(read_cameras(document)) if document is not None else (),
+        animations=tuple(read_animations(document)) if document is not None else (),
     )
 
 
