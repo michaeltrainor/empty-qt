@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import NotRequired, TypedDict
@@ -11,6 +13,7 @@ from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, QObject, Qt, QTim
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
+    QCloseEvent,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSplitter,
     QToolBar,
@@ -48,6 +52,7 @@ from scene_viewport.mesh.importer import (
     IMPORT_SUFFIXES,
     ModelImportError,
     importable_paths,
+    is_importable,
     load_model,
 )
 from scene_viewport.mesh.types import PrimitiveKind
@@ -57,6 +62,7 @@ from scene_viewport.model_import import (
     import_objects,
 )
 from scene_viewport.navigation import NAVIGATION_HINTS
+from scene_viewport.recent_files import RecentFiles
 from scene_viewport.scene import (
     FOLDER_NAMES,
     build_forest,
@@ -75,6 +81,8 @@ from scene_viewport.viewport import (
     attach_viewport,
 )
 from scene_viewport.world import SceneWorld
+
+_log = logging.getLogger(__name__)
 
 _Vec3 = tuple[float, float, float]
 
@@ -145,17 +153,29 @@ class SceneViewportWindow(QMainWindow):
     perspective. **X** toggles snapping (hold Ctrl mid-drag to invert).
     Left-drag box-selects (Shift / Ctrl / Ctrl+Shift as for clicks).
     Camera bindings follow the Maya, Blender, or pygfx preset in
-    Preferences. File menu saves/loads the scene. Ctrl+Z / Ctrl+Y undo and
-    redo.
+    Preferences. File → Open takes a scene or a model file (a model opens as
+    a new, untitled scene), Open Recent lists both, and New / Open / Quit
+    ask before dropping unsaved changes. Ctrl+Z / Ctrl+Y undo and redo.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        recent_path: Path | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Scene viewport")
         self.resize(1200, 640)
         self._syncing = False
         self._gizmo_dragging = False
         self._history = SceneHistory()
+        self._recent_path = recent_path
+        self._recent = RecentFiles.load(recent_path)
+        self._recent_menu: QMenu | None = None
+        # Snapshot of the scene as last opened or saved, for the discard prompt.
+        self._saved_document: SceneDocument | None = None
+        self._import_problems: list[str] = []
         self._gizmo_before: dict[str, TransformComponent] = {}
         self._settings: AppSettings = load_settings()
         self._edit_space: Space = self._settings.default_edit_space
@@ -228,6 +248,8 @@ class SceneViewportWindow(QMainWindow):
             tree_viewport.installEventFilter(self)
         self._install_toolbar()
         self._install_status_bar()
+        # Edits to the startup scene deserve the discard prompt too.
+        self._saved_document = self._world.to_document()
 
     def _install_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -238,8 +260,12 @@ class SceneViewportWindow(QMainWindow):
 
         open_action = QAction("Open...", self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
-        open_action.triggered.connect(self._open_scene)
+        open_action.triggered.connect(self._open_dialog)
         file_menu.addAction(open_action)
+
+        self._recent_menu = file_menu.addMenu("Open Recent")
+        self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
+        self._rebuild_recent_menu()
 
         save_action = QAction("Save", self)
         save_action.setShortcut(QKeySequence.StandardKey.Save)
@@ -947,42 +973,148 @@ class SceneViewportWindow(QMainWindow):
         for light in document.lights:
             self._register_light(light)
         self._rebuild_tree([])
+        self._saved_document = self._world.to_document()
 
-    def _set_scene_path(self, path: Path | None) -> None:
+    def _set_scene_path(self, path: Path | None, *, display: str = "") -> None:
+        """Record the scene file and show its name (or ``display``) in the title."""
         self._scene_path = path
-        title = "Scene viewport"
-        if path is not None:
-            title = f"Scene viewport — {path.name}"
-        self.setWindowTitle(title)
+        name = path.name if path is not None else display
+        self.setWindowTitle(f"Scene viewport — {name}" if name else "Scene viewport")
 
-    def _new_scene(self) -> None:
-        """Reset to the default demo scene."""
-        document = SceneDocument(
+    def _default_document(self) -> SceneDocument:
+        return SceneDocument(
             transforms=transform_components(),
             meshes=mesh_components(),
             lights=light_components(),
         )
-        self._replace_scene(document)
+
+    def _new_scene(self) -> None:
+        """Reset to the default demo scene."""
+        if not self._confirm_discard("New Scene"):
+            return
+        self._replace_scene(self._default_document())
         self._set_scene_path(None)
 
-    def _open_scene(self) -> None:
+    def _has_unsaved_changes(self) -> bool:
+        """Whether the scene differs from what was last opened or saved."""
+        if self._saved_document is None:
+            return False
+        return self._world.to_document() != self._saved_document
+
+    def _confirm_discard(self, title: str) -> bool:
+        """Ask to save, discard, or cancel when the scene has unsaved changes.
+
+        Returns:
+            ``True`` when the caller may replace the scene.
+        """
+        if not self._has_unsaved_changes():
+            return True
+        name = self._scene_path.name if self._scene_path is not None else "this scene"
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"Save changes to {name}?")
+        box.setInformativeText("Unsaved changes will be lost.")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        answer = box.exec()
+        if answer == QMessageBox.StandardButton.Discard:
+            return True
+        if answer == QMessageBox.StandardButton.Save:
+            self._save_scene()
+            return not self._has_unsaved_changes()
+        return False
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._confirm_discard("Quit"):
+            event.accept()
+        else:
+            event.ignore()
+
+    def _open_dialog(self) -> None:
+        """Pick a scene or model file to open as the current scene."""
+        models = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
+        start = self._scene_path or self._import_dir or Path.home()
         path_str, _filter = QFileDialog.getOpenFileName(
             self,
-            "Open Scene",
-            str(self._scene_path or Path.home()),
-            "Scene JSON (*.json)",
+            "Open",
+            str(start),
+            f"Scenes and models (*.json {models});;Scene JSON (*.json);;"
+            f"3D models ({models})",
         )
         if not path_str:
             return
-        path = Path(path_str)
+        self.open_path(Path(path_str))
+
+    def open_path(self, path: Path) -> bool:
+        """Open a scene file, or a model file as a new scene.
+
+        A ``.json`` scene replaces the current scene. A model file (see
+        :data:`IMPORT_SUFFIXES`) starts from the default scene, imports the
+        model, and leaves the scene untitled, so Save asks where to put it.
+        Unsaved changes prompt first.
+
+        Args:
+            path: Scene or model file.
+
+        Returns:
+            ``True`` when the file was opened.
+        """
+        if not self._confirm_discard("Open"):
+            return False
+        if path.suffix.lower() == ".json":
+            try:
+                document = load_scene(path)
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "Open Scene", f"Could not open:\n{exc}")
+                self._forget_recent(path)
+                return False
+            self._replace_scene(document)
+            self._set_scene_path(path)
+            self._remember_recent(path)
+            self._report_open_problems("Open Scene", [])
+            return True
+        if not is_importable(path):
+            QMessageBox.warning(self, "Open", f"Unsupported file type:\n{path.name}")
+            return False
+        if not path.is_file():
+            QMessageBox.warning(self, "Open", f"File not found:\n{path}")
+            self._forget_recent(path)
+            return False
         try:
-            document = load_scene(path)
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Open Scene", f"Could not open:\n{exc}")
-            return
-        self._replace_scene(document)
-        self._set_scene_path(path)
-        problems: list[str] = []
+            # Read the file before touching the current scene, so a broken
+            # model leaves the user's work in place. The import below hits
+            # the parse cache.
+            load_model(path)
+        except ModelImportError as exc:
+            QMessageBox.warning(self, "Open", f"Could not open:\n{exc}")
+            self._forget_recent(path)
+            return False
+        self._replace_scene(self._default_document())
+        self._set_scene_path(None, display=path.name)
+        self._import_dir = path.parent
+        roots = self._import_files([path], report=False)
+        problems, self._import_problems = self._import_problems, []
+        if not roots:
+            self._set_scene_path(None)
+            self._report_open_problems(
+                "Open", problems or [f"Could not open:\n{path.name}"]
+            )
+            self._forget_recent(path)
+            return False
+        # The imported model is the document, not an edit to undo.
+        self._history.clear()
+        self._saved_document = self._world.to_document()
+        self._report_open_problems("Open", problems)
+        return True
+
+    def _report_open_problems(self, title: str, problems: list[str]) -> None:
+        """Warn once about model files or textures that failed to load."""
+        problems = list(problems)
         missing = self._viewport.take_missing_sources()
         if missing:
             listed = "\n".join(str(source) for source in missing)
@@ -990,14 +1122,51 @@ class SceneViewportWindow(QMainWindow):
                 "These model files could not be loaded and are shown as boxes:\n"
                 + listed
             )
-        warnings = self._source_warnings()
-        if warnings:
-            problems.append(
-                "Some files these models use could not be loaded; those parts "
-                "show the material color:\n" + "\n".join(warnings)
-            )
+        if title == "Open Scene":
+            warnings = self._source_warnings()
+            if warnings:
+                problems.append(
+                    "Some files these models use could not be loaded; those parts "
+                    "show the material color:\n" + "\n".join(warnings)
+                )
         if problems:
-            QMessageBox.warning(self, "Open Scene", "\n\n".join(problems))
+            QMessageBox.warning(self, title, "\n\n".join(problems))
+
+    def _remember_recent(self, path: Path) -> None:
+        self._recent.add(path)
+        self._save_recent()
+
+    def _forget_recent(self, path: Path) -> None:
+        self._recent.remove(path)
+        self._save_recent()
+
+    def _save_recent(self) -> None:
+        try:
+            self._recent.save(self._recent_path)
+        except OSError as exc:
+            _log.warning("could not save recent files: %s", exc)
+
+    def _rebuild_recent_menu(self) -> None:
+        menu = self._recent_menu
+        if menu is None:
+            return
+        menu.clear()
+        paths = self._recent.paths
+        for index, path in enumerate(paths, start=1):
+            prefix = f"&{index} " if index < 10 else ""
+            action = menu.addAction(f"{prefix}{path.name}")
+            action.setToolTip(str(path))
+            action.setStatusTip(str(path))
+            action.triggered.connect(lambda _checked=False, p=path: self.open_path(p))
+        if paths:
+            menu.addSeparator()
+        clear_action = menu.addAction("Clear Recent Files")
+        clear_action.setEnabled(bool(paths))
+        clear_action.triggered.connect(self._clear_recent)
+
+    def _clear_recent(self) -> None:
+        self._recent.clear()
+        self._save_recent()
 
     def _import_dialog(self) -> None:
         patterns = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
@@ -1016,8 +1185,14 @@ class SceneViewportWindow(QMainWindow):
         self._import_dir = paths[0].parent
         self._import_files(paths)
 
-    def _import_files(self, paths: Sequence[Path]) -> list[str]:
-        """Import model files as one undo step; return the new root names."""
+    def _import_files(self, paths: Sequence[Path], *, report: bool = True) -> list[str]:
+        """Import model files as one undo step; return the new root names.
+
+        Args:
+            paths: Model files.
+            report: Show problems in a message box. When ``False`` they are
+                left in ``_import_problems`` for the caller to report.
+        """
         used = self._used_names()
         results: list[ImportResult] = []
         failures: list[str] = []
@@ -1028,6 +1203,7 @@ class SceneViewportWindow(QMainWindow):
             except ModelImportError as exc:
                 failures.append(str(exc))
                 continue
+            self._remember_recent(path)
             warnings.extend(model.warnings)
             conversion = import_conversion(
                 path,
@@ -1070,9 +1246,22 @@ class SceneViewportWindow(QMainWindow):
                 "Some files these models use could not be loaded; those parts "
                 "show the material color:\n" + "\n".join(warnings)
             )
-        if problems:
+        if not report:
+            self._import_problems = problems
+        elif problems:
             QMessageBox.warning(self, "Import", "\n\n".join(problems))
         return roots
+
+    def import_files(self, paths: Sequence[Path]) -> list[str]:
+        """Import model files into the current scene as one undo step.
+
+        Args:
+            paths: Model files (see :data:`IMPORT_SUFFIXES`).
+
+        Returns:
+            Names of the new root transforms.
+        """
+        return self._import_files(paths)
 
     def _source_warnings(self) -> list[str]:
         """Warnings from every model file the scene uses, each file once."""
@@ -1147,6 +1336,9 @@ class SceneViewportWindow(QMainWindow):
             save_scene(self._document_from_store(), self._scene_path)
         except OSError as exc:
             QMessageBox.warning(self, "Save Scene", f"Could not save:\n{exc}")
+            return
+        self._saved_document = self._world.to_document()
+        self._remember_recent(self._scene_path)
 
     def _save_scene_as(self) -> None:
         path_str, _filter = QFileDialog.getSaveFileName(
@@ -1166,6 +1358,8 @@ class SceneViewportWindow(QMainWindow):
             QMessageBox.warning(self, "Save Scene", f"Could not save:\n{exc}")
             return
         self._set_scene_path(path)
+        self._saved_document = self._world.to_document()
+        self._remember_recent(path)
 
     def _selection_roots(self) -> list[str]:
         """Selected transforms excluding those under another selected transform."""
@@ -1707,9 +1901,43 @@ def dropped_models(mime: QMimeData | None) -> list[Path]:
     return importable_paths(local)
 
 
-def main() -> int:
-    """Show the scene viewport window and run the Qt event loop."""
+def startup_paths(argv: Sequence[str]) -> list[Path]:
+    """Return the files named on the command line, in order.
+
+    Args:
+        argv: Arguments after the program name.
+
+    Returns:
+        Arguments with a scene (``.json``) or model suffix, whether or not
+        the file exists; :meth:`SceneViewportWindow.open_path` reports a
+        missing one. Other arguments are ignored with a warning.
+    """
+    paths: list[Path] = []
+    for argument in argv:
+        path = Path(argument)
+        if path.suffix.lower() == ".json" or is_importable(path):
+            paths.append(path)
+        else:
+            _log.warning("ignoring argument %s: not a scene or model file", argument)
+    return paths
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Show the scene viewport window and run the Qt event loop.
+
+    Args:
+        argv: Command-line arguments after the program name. Defaults to
+            ``sys.argv[1:]``. The first scene or model file is opened; any
+            further model files are imported into it.
+    """
     app = ensure_application()
     window = SceneViewportWindow()
     window.show()
+    paths = startup_paths(sys.argv[1:] if argv is None else argv)
+    if paths:
+        first, *rest = paths
+        if window.open_path(first):
+            models = [path for path in rest if is_importable(path)]
+            if models:
+                window.import_files(models)
     return app.exec()

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Scene viewport file handling:
+  - File → Open takes model files (glTF/GLB, OBJ, STL, PLY) as well as
+    scene JSON. A model opens as a new, untitled scene with the model
+    imported and framed.
+  - File → Open Recent lists the last ten scenes and models opened,
+    saved, or imported, with Clear Recent Files. The list is stored next
+    to the settings file.
+  - New Scene, Open, and closing the window ask to save, discard, or
+    cancel when the scene has unsaved changes.
+  - `scene-viewport <file> [more model files]` opens the first file and
+    imports the rest.
+- `apps/scene_viewport/scripts/survey_gltf_samples.py` loads every model in
+  a glTF-Sample-Assets checkout headless and writes a Markdown report of
+  what loads, what fails, and which glTF features appear most often, to
+  guide import work.
 - Scene viewport: an OBJ material library named without a `.mtl` suffix is
   scanned for textures too, and MTL map statements with an unknown
   `-option` or a file name starting with `-` resolve to the right file.
