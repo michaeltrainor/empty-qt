@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Scene viewport: File → Export Scene… and Export Selection… write `.glb`
+  or `.gltf`. Transforms become nodes with their TRS, primitives are
+  tessellated, imported meshes are re-embedded from their loaded buffers,
+  materials carry the Mesh tab values and the file's maps (alpha mode,
+  sides, and unlit included), and lights become `KHR_lights_punctual`
+  aimed at the origin as the viewport aims them. Hidden transforms are
+  left out, with a note. `KHR_materials_*` textures are not exported yet.
+- Scene viewport: `KHR_lights_punctual` lights in glTF files import as
+  light shapes on their nodes. A directional light's node is placed so
+  the viewport's aim at the origin reproduces its direction; a spot light
+  keeps its position but loses the file's direction, with a warning.
+  Intensities above 20 are clamped, with a warning.
 - Scene viewport import, second batch from the glTF sample survey:
   - `KHR_materials_clearcoat`, `ior`, `specular`, `sheen`, `iridescence`,
     and `anisotropy` render through pygfx's physical material, with their
