@@ -7,9 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from scene_viewport.components import PrimitiveKind
+from scene_viewport.components import AlphaMode, MapKind, PrimitiveKind
 
-__all__ = ["MeshBuffers", "PrimitiveKind"]
+__all__ = ["AlphaMode", "MapKind", "MeshBuffers", "PrimitiveKind"]
 
 
 @dataclass(frozen=True, slots=True)

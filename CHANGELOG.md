@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Scene viewport import, first batch from the glTF sample survey:
+  - Alpha: glTF `alphaMode` MASK and BLEND, `alphaCutoff`, and the base
+    color alpha now render (cut-out foliage, glass, decals). The Mesh tab
+    gets Opacity, Alpha Mode, and Alpha Cutoff.
+  - Sides: `doubleSided` is honoured, so single-sided glTF materials cull
+    their back faces. Primitives and older scenes stay double sided (new
+    Double Sided field).
+  - Occlusion maps darken ambient light, with the file's strength.
+  - `KHR_texture_transform` offsets, rotations, and scales apply per map.
+  - `KHR_materials_unlit` materials show their color and texture without
+    lighting or shadows (new Unlit field).
+  - Image URIs with percent-escapes such as `paint%20new.png` load.
+  - A map that samples a second UV set is dropped with a warning instead
+    of being mapped wrong.
 - Scene viewport file handling:
   - File → Open takes model files (glTF/GLB, OBJ, STL, PLY) as well as
     scene JSON. A model opens as a new, untitled scene with the model
