@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 from PySide6.QtCore import QByteArray, QMimeData, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtWidgets import QTreeView
 
 from mtqt.models import (
     SCENE_GRAPH_MIME_TYPE,
@@ -242,3 +243,29 @@ def test_scene_graph_mime_drop_protocol() -> None:
     garbage = QMimeData()
     garbage.setData(SCENE_GRAPH_MIME_TYPE, QByteArray(b"not json"))
     assert not model.canDropMimeData(garbage, move, -1, 0, lgt)
+
+
+def test_scene_graph_move_with_view_when_destination_row_shifts(qtbot) -> None:
+    """Moving siblings that precede the destination must not crash the view.
+
+    Regression: a cached destination index went stale after the first move
+    shifted the destination's own row, and ``endMoveRows`` segfaulted.
+    """
+    model = SceneGraphModel(
+        [["n0", ["n5"]], ["n1", ["n4"]], ["n2"], ["n3", ["n7"]], ["n6"]]
+    )
+    view = QTreeView()
+    qtbot.addWidget(view)
+    view.setModel(model)
+    view.expandAll()
+    n2 = QPersistentModelIndex(model.index_for_name("n2"))
+
+    assert model.move_nodes(["n1", "n3", "n5"], "n2", 3)
+    assert model.to_lists() == [
+        ["n0"],
+        ["n2", ["n5"], ["n1", ["n4"]], ["n3", ["n7"]]],
+        ["n6"],
+    ]
+    assert n2.isValid()
+    assert model.node_at(n2).name == "n2"
+    assert view.isExpanded(model.index_for_name("n1"))

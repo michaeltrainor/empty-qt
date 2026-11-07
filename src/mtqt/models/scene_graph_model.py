@@ -397,7 +397,6 @@ class SceneGraphModel(QAbstractItemModel):
         if checked is None:
             return False
         top, parent_node, cursor = checked
-        parent_index = self._index_for_node(parent_node)
         placed = 0  # Moved nodes occupy rows [cursor - placed, cursor).
         changed = False
         for node in top:
@@ -405,12 +404,16 @@ class SceneGraphModel(QAbstractItemModel):
             if source is None:
                 continue
             source_row = source.children.index(node)
+            # Earlier moves in this loop shift rows, so both parent indexes
+            # must be rebuilt for every move; a cached one segfaults in Qt.
+            parent_index = self._index_for_node(parent_node)
             if source is parent_node:
                 if source_row >= cursor:
                     if source_row != cursor:
-                        self.beginMoveRows(
+                        if not self.beginMoveRows(
                             parent_index, source_row, source_row, parent_index, cursor
-                        )
+                        ):
+                            break
                         source.children.pop(source_row)
                         source.children.insert(cursor, node)
                         self.endMoveRows()
@@ -419,18 +422,20 @@ class SceneGraphModel(QAbstractItemModel):
                 elif placed == 0 and source_row == cursor - 1:
                     pass  # Already right before the insertion point.
                 else:
-                    self.beginMoveRows(
+                    if not self.beginMoveRows(
                         parent_index, source_row, source_row, parent_index, cursor
-                    )
+                    ):
+                        break
                     source.children.pop(source_row)
                     source.children.insert(cursor - 1, node)
                     self.endMoveRows()
                     changed = True
             else:
                 source_index = self._index_for_node(source)
-                self.beginMoveRows(
+                if not self.beginMoveRows(
                     source_index, source_row, source_row, parent_index, cursor
-                )
+                ):
+                    break
                 source.children.pop(source_row)
                 node.parent = parent_node
                 parent_node.children.insert(cursor, node)
