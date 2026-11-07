@@ -77,7 +77,13 @@ from scene_viewport.scene import (
     mesh_components,
     transform_components,
 )
-from scene_viewport.scene_io import SceneDocument, load_scene, save_scene
+from scene_viewport.scene_io import (
+    SCENE_SUFFIXES,
+    SceneDocument,
+    is_scene_file,
+    load_scene,
+    save_scene,
+)
 from scene_viewport.settings import AppSettings, load_settings, save_settings
 from scene_viewport.settings_dialog import SettingsDialog
 from scene_viewport.viewport import (
@@ -1238,12 +1244,13 @@ class SceneViewportWindow(QMainWindow):
     def _open_dialog(self) -> None:
         """Pick a scene or model file to open as the current scene."""
         models = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
+        scenes = " ".join(f"*{suffix}" for suffix in SCENE_SUFFIXES)
         start = self._scene_path or self._import_dir or Path.home()
         path_str, _filter = QFileDialog.getOpenFileName(
             self,
             "Open",
             str(start),
-            f"Scenes and models (*.json {models});;Scene JSON (*.json);;"
+            f"Scenes and models ({scenes} {models});;Scenes ({scenes});;"
             f"3D models ({models})",
         )
         if not path_str:
@@ -1253,7 +1260,8 @@ class SceneViewportWindow(QMainWindow):
     def open_path(self, path: Path) -> bool:
         """Open a scene file, or a model file as a new scene.
 
-        A ``.json`` scene replaces the current scene. A model file (see
+        A scene file (JSON or USD, see :data:`SCENE_SUFFIXES`) replaces the
+        current scene. A model file (see
         :data:`IMPORT_SUFFIXES`) starts from the default scene, imports the
         model, and leaves the scene untitled, so Save asks where to put it.
         Unsaved changes prompt first.
@@ -1266,7 +1274,7 @@ class SceneViewportWindow(QMainWindow):
         """
         if not self._confirm_discard("Open"):
             return False
-        if path.suffix.lower() == ".json":
+        if is_scene_file(path):
             try:
                 document = load_scene(path)
             except (OSError, ValueError) as exc:
@@ -1616,17 +1624,24 @@ class SceneViewportWindow(QMainWindow):
         self._remember_recent(self._scene_path)
 
     def _save_scene_as(self) -> None:
-        path_str, _filter = QFileDialog.getSaveFileName(
+        path_str, chosen = QFileDialog.getSaveFileName(
             self,
             "Save Scene As",
             str(self._scene_path or Path.home() / "scene.json"),
-            "Scene JSON (*.json)",
+            "Scene JSON (*.json);;USD ASCII (*.usda);;USD binary (*.usdc)",
         )
         if not path_str:
             return
         path = Path(path_str)
-        if path.suffix.lower() != ".json":
-            path = path.with_suffix(".json")
+        if not is_scene_file(path):
+            suffix = (
+                ".usda"
+                if "usda" in chosen
+                else ".usdc"
+                if "usdc" in chosen
+                else ".json"
+            )
+            path = path.with_suffix(suffix)
         try:
             save_scene(self._document_from_store(), path)
         except OSError as exc:
@@ -2222,14 +2237,14 @@ def startup_paths(argv: Sequence[str]) -> list[Path]:
         argv: Arguments after the program name.
 
     Returns:
-        Arguments with a scene (``.json``) or model suffix, whether or not
+        Arguments with a scene (JSON or USD) or model suffix, whether or not
         the file exists; :meth:`SceneViewportWindow.open_path` reports a
         missing one. Other arguments are ignored with a warning.
     """
     paths: list[Path] = []
     for argument in argv:
         path = Path(argument)
-        if path.suffix.lower() == ".json" or is_importable(path):
+        if is_scene_file(path) or is_importable(path):
             paths.append(path)
         else:
             _log.warning("ignoring argument %s: not a scene or model file", argument)

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
+  `.usd`) next to JSON. Transforms, primitives, imported meshes (with
+  their triangles embedded for other tools), Mesh tab materials as
+  `UsdPreviewSurface`, lights, cameras, and animation clips (one
+  sublayer each) all round-trip unchanged. STEP and CUBICSPLINE channels
+  are baked for other USD tools and kept exactly for the viewport.
+  Stages from other tools open with their transforms, primitives,
+  lights, and cameras. Adds the `usd-core` dependency to the app.
 - `TimelineBar`: transport controls for clip playback (play / pause,
   stop, loop, clip picker, scrub slider, time readout, speed). The host
   owns the clock; the bar emits only for user actions, and its setters

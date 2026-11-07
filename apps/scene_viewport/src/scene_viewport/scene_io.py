@@ -1,4 +1,9 @@
-"""Load and save scene viewport component graphs as JSON."""
+"""Load and save scene viewport component graphs as JSON or USD.
+
+JSON is the app's own format. ``.usda``, ``.usdc``, and ``.usd`` go
+through :mod:`scene_viewport.usd_io`, which maps every component onto
+standard USD schemas.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +20,18 @@ from scene_viewport.components import (
     MeshComponent,
     TransformComponent,
 )
+
+#: JSON is the app's own scene format; the rest are USD layers.
+SCENE_SUFFIXES = (".json", ".usda", ".usdc", ".usd")
+
+
+def is_scene_file(path: Path) -> bool:
+    """Return whether ``path`` has a scene suffix (JSON or USD).
+
+    Args:
+        path: Candidate file path.
+    """
+    return path.suffix.lower() in SCENE_SUFFIXES
 
 
 class SceneDocument(BaseModel):
@@ -40,7 +57,7 @@ def load_scene(path: Path) -> SceneDocument:
     """Load a scene document from ``path``.
 
     Args:
-        path: JSON file path.
+        path: JSON or USD file path (see :data:`SCENE_SUFFIXES`).
 
     Relative mesh ``source`` paths are resolved against the scene file's
     folder, so the returned document holds absolute paths.
@@ -50,8 +67,13 @@ def load_scene(path: Path) -> SceneDocument:
 
     Raises:
         OSError: When the file cannot be read.
-        ValueError: When the JSON is invalid for this schema.
+        ValueError: When the JSON is invalid for this schema, or the USD
+            file cannot be opened.
     """
+    if path.suffix.lower() != ".json":
+        from scene_viewport.usd_io import load_usd_scene
+
+        return load_usd_scene(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     document = SceneDocument.model_validate(payload)
     base = path.resolve().parent
@@ -59,11 +81,11 @@ def load_scene(path: Path) -> SceneDocument:
 
 
 def save_scene(document: SceneDocument, path: Path) -> Path:
-    """Write ``document`` to ``path`` as pretty JSON.
+    """Write ``document`` to ``path`` as pretty JSON, or as USD by suffix.
 
     Args:
         document: Scene to persist.
-        path: Destination file.
+        path: Destination file; a USD suffix writes a USD stage.
 
     Mesh ``source`` paths are written relative to the scene file's folder
     when they share a drive with it, so a scene and its models can move
@@ -72,6 +94,10 @@ def save_scene(document: SceneDocument, path: Path) -> Path:
     Returns:
         The path written.
     """
+    if path.suffix.lower() != ".json":
+        from scene_viewport.usd_io import save_usd_scene
+
+        return save_usd_scene(document, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     base = path.resolve().parent
     document = _with_sources(document, lambda source: _relative_to(source, base))
