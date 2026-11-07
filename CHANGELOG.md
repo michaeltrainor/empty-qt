@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Scene viewport: imported models bring their base color texture (glTF,
+  embedded or external, and OBJ). Textured mode (6) shows it; a Mesh tab
+  Albedo Map still overrides it. Adds `pillow` to the app's dependencies.
+- Scene viewport: framing (F, A, Home, and after an import) in the top,
+  front, and side views no longer clips the framed objects. A flat object
+  facing the view could vanish entirely.
 - Scene viewport: import glTF/GLB, OBJ, STL, and PLY models with File →
   Import… or by dropping files on the window. glTF files keep their node
   hierarchy and names, and materials bring their base color, roughness,

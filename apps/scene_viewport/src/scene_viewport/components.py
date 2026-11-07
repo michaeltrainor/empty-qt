@@ -109,7 +109,10 @@ class MeshComponent(BaseModel):
     albedo_map: Path = Field(
         default=Path(""),
         title="Albedo Map",
-        description="Optional color texture path. Empty uses Color. Mode 6 shows it.",
+        description=(
+            "Optional color texture path. Empty uses the model file's texture "
+            "(imported meshes) or Color. Mode 6 shows it."
+        ),
     )
     cast_shadow: bool = Field(default=True, title="Cast Shadow")
     receive_shadow: bool = Field(default=True, title="Receive Shadow")
