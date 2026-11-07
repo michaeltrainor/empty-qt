@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 Space = Literal["local", "world"]
 LightKind = Literal["directional", "point", "spot"]
 PrimitiveKind = Literal["box", "plane", "sphere"]
+#: Built-in primitives, or ``file`` for a mesh read from a model file.
+MeshKind = Literal["box", "plane", "sphere", "file"]
 
 
 class TransformComponent(BaseModel):
@@ -68,12 +70,25 @@ class MeshComponent(BaseModel):
     """A drawable mesh shape parented under a transform.
 
     Has no local TRS — placement comes from :attr:`transform`. Shown as the
-    Mesh tab when that transform is selected.
+    Mesh tab when that transform is selected. A ``file`` mesh draws
+    :attr:`source_mesh` from the model file :attr:`source`.
     """
 
     name: str = Field(frozen=True, title="Name")
     transform: str = Field(frozen=True, title="Transform")
-    kind: PrimitiveKind = Field(frozen=True, title="Kind")
+    kind: MeshKind = Field(frozen=True, title="Kind")
+    source: Path = Field(
+        default=Path(""),
+        frozen=True,
+        title="Source",
+        description="Model file of an imported mesh. Saved relative to the scene.",
+    )
+    source_mesh: str = Field(
+        default="",
+        frozen=True,
+        title="Source Mesh",
+        description="Mesh name inside the source file.",
+    )
     color: str = Field(
         default="#8899aa",
         title="Color",
@@ -98,6 +113,11 @@ class MeshComponent(BaseModel):
     )
     cast_shadow: bool = Field(default=True, title="Cast Shadow")
     receive_shadow: bool = Field(default=True, title="Receive Shadow")
+
+    @field_serializer("source")
+    def _source_posix(self, source: Path) -> str:
+        # Forward slashes, so a saved scene opens on any OS.
+        return source.as_posix()
 
 
 class LightComponent(BaseModel):

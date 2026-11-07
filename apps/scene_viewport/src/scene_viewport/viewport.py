@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import weakref
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -32,7 +34,8 @@ from scene_viewport.gizmo import (
     InteractionTool,
     MayaTransformGizmo,
 )
-from scene_viewport.mesh.geometry import geometry_for
+from scene_viewport.mesh.geometry import file_geometry, geometry_for
+from scene_viewport.mesh.importer import ModelImportError
 from scene_viewport.navigation import navigation_controls
 from scene_viewport.settings import AppSettings, renderer_gamma
 from scene_viewport.textures import load_albedo_texture
@@ -54,6 +57,8 @@ _PERSPECTIVE_FOV = 50.0
 _BOX_COLOR = "#e6e6e6"
 
 Vec3 = tuple[float, float, float]
+
+_log = logging.getLogger(__name__)
 
 # pygfx ships no type annotations, so pyright infers each parameter from its
 # default value: `intensity=1` becomes `int`, and passing a float is flagged.
@@ -179,6 +184,8 @@ class ViewportController:
         self._grid: gfx.GridHelper | None = None
         self._env_map: gfx.Texture | None = None
         self._albedo_cache: dict[str, gfx.Texture | None] = {}
+        # Model files that failed to load since take_missing_sources().
+        self._missing_sources: list[Path] = []
         self._light_aim: gfx.WorldObject | None = None
         # Pinned (near, far) for each patched point or spot shadow.
         # See _pin_perspective_shadow_depth.
@@ -1272,13 +1279,38 @@ class ViewportController:
             return self._helper_to_transform[name]
         return None
 
+    def take_missing_sources(self) -> list[Path]:
+        """Return model files that failed to load, and forget them.
+
+        A ``file`` mesh whose source is missing or unreadable is drawn as a
+        placeholder box, so the host can warn once after loading a scene.
+
+        Returns:
+            Each failed source path once, in the order meshes were added.
+        """
+        missing = self._missing_sources
+        self._missing_sources = []
+        return missing
+
+    def _geometry_for(self, component: MeshComponent) -> gfx.Geometry:
+        """Tessellate a primitive, or read a ``file`` mesh's source."""
+        if component.kind != "file":
+            return geometry_for(component.kind)
+        try:
+            return file_geometry(component.source, component.source_mesh)
+        except ModelImportError as exc:
+            _log.warning("%s: %s; drawing a placeholder box", component.name, exc)
+            if component.source not in self._missing_sources:
+                self._missing_sources.append(component.source)
+            return geometry_for("box")
+
     def _add_mesh(self, component: MeshComponent) -> None:
         group = self._groups.get(component.transform)
         if group is None:
             msg = f"mesh {component.name!r} missing transform {component.transform!r}"
             raise KeyError(msg)
 
-        geometry = geometry_for(component.kind)
+        geometry = self._geometry_for(component)
         mesh = gfx.Mesh(
             geometry,
             self._mesh_material(component),

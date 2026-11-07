@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pygfx as gfx
 
+from scene_viewport.mesh.importer import ModelImportError, load_model
 from scene_viewport.mesh.primitives import box, plane, uv_sphere
 from scene_viewport.mesh.types import MeshBuffers, PrimitiveKind
 
@@ -28,3 +31,16 @@ def geometry_for(kind: PrimitiveKind) -> gfx.Geometry:
         return to_geometry(uv_sphere(0.5, stacks=16, slices=24))
     msg = f"unknown primitive kind: {kind!r}"
     raise ValueError(msg)
+
+
+def file_geometry(source: Path, mesh: str) -> gfx.Geometry:
+    """Return pygfx geometry for mesh ``mesh`` of the model file ``source``.
+
+    Raises:
+        ModelImportError: When the file can't be read or has no such mesh.
+    """
+    buffers = load_model(source).meshes.get(mesh)
+    if buffers is None:
+        msg = f"{source.name} has no mesh {mesh!r}"
+        raise ModelImportError(msg)
+    return to_geometry(buffers)
