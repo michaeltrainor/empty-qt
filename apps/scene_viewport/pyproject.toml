@@ -13,6 +13,7 @@ dependencies = [
     "pylinalg",
     "rendercanvas",
     "trimesh>=4.5",
+    "usd-core>=26.11",
     "wgpu",
 ]
 classifiers = ["Private :: Do Not Upload"]

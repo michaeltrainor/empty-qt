@@ -954,6 +954,7 @@ dependencies = [
     { name = "pylinalg" },
     { name = "rendercanvas" },
     { name = "trimesh" },
+    { name = "usd-core" },
     { name = "wgpu" },
 ]
 
@@ -968,6 +969,7 @@ requires-dist = [
     { name = "pylinalg" },
     { name = "rendercanvas" },
     { name = "trimesh", specifier = ">=4.5" },
+    { name = "usd-core", specifier = ">=26.11" },
     { name = "wgpu" },
 ]
 
@@ -1048,6 +1050,17 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+]
+
+[[package]]
+name = "usd-core"
+version = "26.11"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/fe/51beb2e4b814abaac00f7e8998c2df7b2114df391c3b7c46679a4bf129e2/usd_core-26.11-cp313-none-macosx_10_15_universal2.whl", hash = "sha256:e0eb21b39464f3bb4fed1393072fea3f19cf6ff5b2844f49832c6f075e5b1e2f", size = 41031318, upload-time = "2026-10-21T05:54:21.062Z" },
+    { url = "https://files.pythonhosted.org/packages/98/50/98cc58f8916942023618314c33449bf6fb2d514a0e17a9a616d673609532/usd_core-26.11-cp313-none-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e1e420ae1d0d92072fa9793e0f0d499aa3c51991d50db8160f2a15c9934a4afd", size = 27720879, upload-time = "2026-10-21T05:54:24.118Z" },
+    { url = "https://files.pythonhosted.org/packages/49/d0/aade15c70521eb0e87b9e8b0ffbe2024633b37f7243d1b98482fc9fb6ec6/usd_core-26.11-cp313-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:da42ec136033a69975655b44c65c75c6a494ddc8f1e6a52d57cb7cd2dc4603a8", size = 28776181, upload-time = "2026-10-21T05:54:27.1Z" },
+    { url = "https://files.pythonhosted.org/packages/02/79/872355c8418b8659e2b0e1436083a5bcdf43edb75d6ba8f531e4b1300113/usd_core-26.11-cp313-none-win_amd64.whl", hash = "sha256:9d6dab0d6933b23bd567b90532fea3c5aef8f6d435ccf3551f788f93c366e0b4", size = 13116328, upload-time = "2026-10-21T05:54:29.639Z" },
 ]
 
 [[package]]
