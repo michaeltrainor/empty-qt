@@ -82,3 +82,30 @@ def test_confirm_discard_skips_the_prompt_when_clean() -> None:
     world = SceneWorld(transforms=[TransformComponent(name="a")])
     ns = _window(world, world.to_document())
     assert SceneViewportWindow._confirm_discard(ns, "Open")  # type: ignore[arg-type]
+
+
+def test_open_path_with_a_broken_model_keeps_the_scene(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A model that fails to load is reported and the current scene is untouched."""
+    from PySide6.QtWidgets import QMessageBox
+
+    bad = tmp_path / "broken.glb"
+    bad.write_bytes(b"not a glb")
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args, **kwargs: warnings.append(str(args[2]))
+    )
+    forgotten: list[Path] = []
+    # No _replace_scene on the stand-in: touching the scene would raise.
+    ns = SimpleNamespace(
+        _confirm_discard=lambda title: True,
+        _forget_recent=forgotten.append,
+    )
+    assert not SceneViewportWindow.open_path(ns, bad)  # type: ignore[arg-type]
+    assert len(warnings) == 1
+    assert "Could not open" in warnings[-1]
+    assert forgotten == [bad]
+    # An unsupported suffix is refused before any file access.
+    assert not SceneViewportWindow.open_path(ns, tmp_path / "notes.txt")  # type: ignore[arg-type]
+    assert "Unsupported file type" in warnings[-1]

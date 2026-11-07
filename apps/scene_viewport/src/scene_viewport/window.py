@@ -248,6 +248,8 @@ class SceneViewportWindow(QMainWindow):
             tree_viewport.installEventFilter(self)
         self._install_toolbar()
         self._install_status_bar()
+        # Edits to the startup scene deserve the discard prompt too.
+        self._saved_document = self._world.to_document()
 
     def _install_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -1083,18 +1085,31 @@ class SceneViewportWindow(QMainWindow):
             QMessageBox.warning(self, "Open", f"File not found:\n{path}")
             self._forget_recent(path)
             return False
+        try:
+            # Read the file before touching the current scene, so a broken
+            # model leaves the user's work in place. The import below hits
+            # the parse cache.
+            load_model(path)
+        except ModelImportError as exc:
+            QMessageBox.warning(self, "Open", f"Could not open:\n{exc}")
+            self._forget_recent(path)
+            return False
         self._replace_scene(self._default_document())
         self._set_scene_path(None, display=path.name)
         self._import_dir = path.parent
         roots = self._import_files([path], report=False)
+        problems, self._import_problems = self._import_problems, []
         if not roots:
+            self._set_scene_path(None)
+            self._report_open_problems(
+                "Open", problems or [f"Could not open:\n{path.name}"]
+            )
             self._forget_recent(path)
             return False
         # The imported model is the document, not an edit to undo.
         self._history.clear()
         self._saved_document = self._world.to_document()
-        self._report_open_problems("Open", self._import_problems)
-        self._import_problems = []
+        self._report_open_problems("Open", problems)
         return True
 
     def _report_open_problems(self, title: str, problems: list[str]) -> None:
@@ -1893,8 +1908,9 @@ def startup_paths(argv: Sequence[str]) -> list[Path]:
         argv: Arguments after the program name.
 
     Returns:
-        Existing scene (``.json``) and model files; other arguments are
-        ignored with a warning.
+        Arguments with a scene (``.json``) or model suffix, whether or not
+        the file exists; :meth:`SceneViewportWindow.open_path` reports a
+        missing one. Other arguments are ignored with a warning.
     """
     paths: list[Path] = []
     for argument in argv:
