@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
-from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, Qt
+from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, QObject, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -138,7 +138,8 @@ class SceneViewportWindow(QMainWindow):
     Maya-aligned tools (toolbar + hotkeys): **Q** select, **W** move,
     **E** rotate, **R** scale; World/Local on the toolbar; **D** edit pivot.
     Shading **1**-**6** (bbox / wire+shaded / flat / wire / shaded / textured).
-    **P** parent to last selected, **Shift+P** unparent. Ctrl+D duplicate,
+    **P** parent to last selected, **Shift+P** unparent, or drag rows in the
+    tree to reparent and reorder (world pose kept). Ctrl+D duplicate,
     rename, **F** frame selected, **A** frame all, Ctrl+I isolate, Ctrl+H
     hide. Numpad **7** / **1** / **3** / **5** switch to top / front / side /
     perspective. **X** toggles snapping (hold Ctrl mid-drag to invert).
@@ -180,8 +181,11 @@ class SceneViewportWindow(QMainWindow):
         self._tree = SceneGraphTree(
             build_forest(transforms, meshes, lights),
             parent=splitter,
+            drag_drop=True,
         )
         self._tree.setMinimumWidth(200)
+        self._tree.set_move_filter(self._accept_tree_move)
+        self._tree.nodesMoved.connect(self._on_tree_nodes_moved)
         self._canvas = QRenderWidget(splitter, update_mode="continuous")
         self._canvas.setObjectName("SceneViewportCanvas")
         self._props = PropertiesBook(
@@ -215,8 +219,13 @@ class SceneViewportWindow(QMainWindow):
         self._props.register_handler(self._on_prop_field)
         self._props.fieldPreviewed.connect(self._on_prop_preview)
         self._install_menus()
-        # Model files dropped anywhere on the window are imported.
+        # Model files dropped anywhere on the window are imported. The tree
+        # accepts drops for its own rows, so it would swallow file drags;
+        # catch those first and treat them like a drop on the window.
         self.setAcceptDrops(True)
+        tree_viewport = self._tree.view.viewport()
+        if tree_viewport is not None:
+            tree_viewport.installEventFilter(self)
         self._install_toolbar()
         self._install_status_bar()
 
@@ -765,31 +774,113 @@ class SceneViewportWindow(QMainWindow):
         for name in names[:-1]:
             if name == new_parent:
                 continue
-            stored = self._world.transforms.get(name)
-            if stored is None or stored.parent == new_parent:
-                continue
-            snap = self._snapshot_transform(name)
-            if snap is None:
-                continue
-            local = self._viewport.reparent_transform(name, new_parent)
-            if local is None:
-                continue
-            position, rotation, scale = local
-            updated = stored.model_copy(
-                update={
-                    "parent": new_parent,
-                    "position": position,
-                    "rotation": rotation,
-                    "scale": scale,
-                }
-            )
-            before[name] = snap
-            after[name] = updated
-            self._world.transforms[name] = updated
+            self._reparent_keep_world(name, new_parent, before, after)
         if not after:
             return
         self._push_transform_edits("Parent", before, after)
         self._rebuild_tree(names)
+
+    def _reparent_keep_world(
+        self,
+        name: str,
+        new_parent: str,
+        before: dict[str, TransformComponent],
+        after: dict[str, TransformComponent],
+    ) -> bool:
+        """Reparent ``name`` in the store and viewport, keeping its world pose.
+
+        Records the old and new components in ``before`` / ``after`` for an
+        undo step. Returns ``False`` when nothing changed: the transform is
+        missing, already under ``new_parent``, or the move is invalid.
+        """
+        stored = self._world.transforms.get(name)
+        if stored is None or stored.parent == new_parent:
+            return False
+        snap = self._snapshot_transform(name)
+        if snap is None:
+            return False
+        local = self._viewport.reparent_transform(name, new_parent)
+        if local is None:
+            return False
+        position, rotation, scale = local
+        updated = stored.model_copy(
+            update={
+                "parent": new_parent,
+                "position": position,
+                "rotation": rotation,
+                "scale": scale,
+            }
+        )
+        before[name] = snap
+        after[name] = updated
+        self._world.transforms[name] = updated
+        return True
+
+    def _accept_tree_move(self, names: Sequence[str], parent: str, _row: int) -> bool:
+        """Veto outliner drags that don't map onto the transform hierarchy.
+
+        Only transforms move: folders and shape leaves stay put. They can
+        land on another transform, or on the ``geo`` / ``lgt`` folder for the
+        scene root, where lights go under ``lgt`` and everything else under
+        ``geo``, as :func:`build_forest` would place them.
+        """
+        transforms = self._world.transforms
+        if not names or any(name not in transforms for name in names):
+            return False
+        if parent == "lgt":
+            return all(self._world.lights_on(name) for name in names)
+        if parent == "geo":
+            return not any(self._world.lights_on(name) for name in names)
+        return parent in transforms
+
+    def _tree_transform_order(self) -> list[str]:
+        """Return every transform UID in the outliner's top-down order."""
+        order: list[str] = []
+        transforms = self._world.transforms
+
+        def walk(node: object) -> None:
+            if not isinstance(node, list) or not node:
+                return
+            name = node[0]
+            if isinstance(name, str) and name in transforms:
+                order.append(name)
+            for child in node[1:]:
+                walk(child)
+
+        for root in self._tree.model.to_lists():
+            walk(root)
+        return order
+
+    def _on_tree_nodes_moved(self, names: list[str], parent: str, _row: int) -> None:
+        """Mirror an outliner drag into the store, viewport, and history."""
+        new_parent = "" if parent in FOLDER_NAMES else parent
+        moved = [name for name in names if name in self._world.transforms]
+        if not moved:
+            QTimer.singleShot(0, lambda: self._rebuild_tree([]))
+            return
+        order_before = list(self._world.transforms)
+        before: dict[str, TransformComponent] = {}
+        after: dict[str, TransformComponent] = {}
+        for name in moved:
+            if not self._reparent_keep_world(name, new_parent, before, after):
+                snap = self._snapshot_transform(name)
+                if snap is not None:
+                    before[name] = snap
+                    after[name] = snap.model_copy(deep=True)
+        self._world.reorder_transforms(self._tree_transform_order())
+        order_after = list(self._world.transforms)
+        if before != after or order_before != order_after:
+            self._history.push(
+                HistoryStep(
+                    label="Move",
+                    transforms_before=before,
+                    transforms_after=after,
+                    order_before=order_before,
+                    order_after=order_after,
+                )
+            )
+        # The tree is mid-drop; rebuild it from the store once that finishes.
+        QTimer.singleShot(0, lambda: self._rebuild_tree(moved))
 
     def _unparent_selection(self) -> None:
         """Move selected transforms to the scene root, preserving world pose."""
@@ -803,27 +894,7 @@ class SceneViewportWindow(QMainWindow):
         before: dict[str, TransformComponent] = {}
         after: dict[str, TransformComponent] = {}
         for name in names:
-            stored = self._world.transforms.get(name)
-            if stored is None or not stored.parent:
-                continue
-            snap = self._snapshot_transform(name)
-            if snap is None:
-                continue
-            local = self._viewport.reparent_transform(name, "")
-            if local is None:
-                continue
-            position, rotation, scale = local
-            updated = stored.model_copy(
-                update={
-                    "parent": "",
-                    "position": position,
-                    "rotation": rotation,
-                    "scale": scale,
-                }
-            )
-            before[name] = snap
-            after[name] = updated
-            self._world.transforms[name] = updated
+            self._reparent_keep_world(name, "", before, after)
         if not after:
             return
         self._push_transform_edits("Unparent", before, after)
@@ -1032,6 +1103,21 @@ class SceneViewportWindow(QMainWindow):
         # Coming back from an image editor or DCC: reload what was saved.
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             self._reload_changed_files()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        # File drags over the outliner import like drops anywhere else.
+        if (
+            event.type()
+            in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop)
+            and isinstance(event, QDropEvent)
+            and dropped_models(event.mimeData())
+        ):
+            if event.type() == QEvent.Type.Drop:
+                self.dropEvent(event)
+            else:
+                event.acceptProposedAction()
+            return True
+        return super().eventFilter(watched, event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if dropped_models(event.mimeData()):
@@ -1312,6 +1398,9 @@ class SceneViewportWindow(QMainWindow):
             for component in step.transforms_after.values():
                 if component.name in self._world.transforms:
                     self._apply_stored_transform(component)
+        order = step.order_before if undo else step.order_after
+        if order is not None:
+            self._world.reorder_transforms(order)
         select = list(step.transforms_after or step.transforms_before)
         if step.renames:
             select = list(step.renames.keys() if undo else step.renames.values())

@@ -7,7 +7,7 @@ mirroring stays in :class:`ViewportController`.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 
 from scene_viewport.components import (
     LightComponent,
@@ -305,6 +305,24 @@ class SceneWorld:
                     update={"parent": new_name}
                 )
         return updated
+
+    def reorder_transforms(self, names: Sequence[str]) -> None:
+        """Reorder the transform table, which sets outliner and file order.
+
+        Args:
+            names: Transform UIDs in the wanted order. Unknown names are
+                skipped, and transforms not listed keep their relative order
+                after the listed ones.
+        """
+        ordered: dict[str, TransformComponent] = {}
+        for name in names:
+            stored = self._transforms.get(name)
+            if stored is not None and name not in ordered:
+                ordered[name] = stored
+        for name, stored in self._transforms.items():
+            ordered.setdefault(name, stored)
+        self._transforms.clear()
+        self._transforms.update(ordered)
 
     def descendant_transforms(self, roots: list[str]) -> list[str]:
         """Return ``roots`` plus descendants, parents before children.

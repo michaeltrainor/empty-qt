@@ -27,6 +27,8 @@ class HistoryStep:
     ``transforms_before`` / ``transforms_after`` cover TRS, pivot, and parent
     changes for existing nodes. ``added`` / ``removed`` cover create/delete.
     ``renames`` maps old transform UID → new UID (inverted on undo).
+    ``order_before`` / ``order_after`` hold the full transform UID order when
+    a step reorders siblings, such as a drag in the outliner.
     """
 
     label: str
@@ -35,6 +37,8 @@ class HistoryStep:
     added: SceneObjects | None = None
     removed: SceneObjects | None = None
     renames: dict[str, str] = field(default_factory=dict)
+    order_before: list[str] | None = None
+    order_after: list[str] | None = None
 
 
 class SceneHistory:
