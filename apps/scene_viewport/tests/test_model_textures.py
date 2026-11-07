@@ -392,3 +392,34 @@ def test_remote_gltf_uris_are_reported_as_remote_not_missing(tmp_path: Path) -> 
         "scene.gltf: remote file not loaded HTTP://example.com/paint.png",
     ]
     assert remote_references(tmp_path / "missing.gltf") == ()
+
+
+def test_obj_libraries_without_mtl_suffix_are_scanned(tmp_path: Path) -> None:
+    (tmp_path / "materials.txt").write_text(
+        "newmtl a\nmap_Kd paint.png\n", encoding="utf-8"
+    )
+    obj = tmp_path / "quad.obj"
+    obj.write_text("mtllib materials.txt\nv 0 0 0\n", encoding="utf-8")
+    assert [f.name for f in referenced_files(obj)] == ["materials.txt", "paint.png"]
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        ("map_Kd -halo tex.png", "tex.png"),
+        ("map_Kd -halo 1 on tex.png", "tex.png"),
+        ("map_Kd -halo word tex.png", "word tex.png"),
+        ("map_Kd -shadow.png", "-shadow.png"),
+        ("map_Kd -o 1 2 -dark.png", "-dark.png"),
+        ("map_Kd -bm", ""),
+        ("map_Kd -type sphere env.png", "env.png"),
+    ],
+)
+def test_mtl_map_file_names_after_unknown_options(
+    tmp_path: Path, statement: str, expected: str
+) -> None:
+    (tmp_path / "m.mtl").write_text(f"newmtl a\n{statement}\n", encoding="utf-8")
+    obj = tmp_path / "quad.obj"
+    obj.write_text("mtllib m.mtl\nv 0 0 0\n", encoding="utf-8")
+    names = [f.name for f in referenced_files(obj)][1:]
+    assert names == ([expected] if expected else [])
