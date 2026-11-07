@@ -3,9 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QMimeData, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtWidgets import QTreeView
 
-from mtqt.models import ObjectListModel, ObjectTableModel, SceneGraphModel
+from mtqt.models import (
+    SCENE_GRAPH_MIME_TYPE,
+    ObjectListModel,
+    ObjectTableModel,
+    SceneGraphModel,
+)
 
 
 @dataclass
@@ -114,3 +120,152 @@ def test_scene_graph_rejects_string_children() -> None:
         SceneGraphModel([["world", "geo"]])
     with pytest.raises(TypeError, match="forest"):
         SceneGraphModel(["world", ["geo"]])
+
+
+MOVE_FOREST = [["world", ["geo", ["a"], ["b"], ["c"]], ["lgt", ["key"]]]]
+
+
+def test_scene_graph_move_reparents_and_reorders(qtmodeltester) -> None:
+    model = SceneGraphModel(MOVE_FOREST)
+    qtmodeltester.check(model)
+    moves: list[tuple[list[str], str, int]] = []
+    model.nodesMoved.connect(
+        lambda names, parent, row: moves.append((names, parent, row))
+    )
+    a = QPersistentModelIndex(model.index_for_name("a"))
+
+    assert model.move_nodes(["a"], "lgt")
+    assert model.to_lists() == [
+        ["world", ["geo", ["b"], ["c"]], ["lgt", ["key"], ["a"]]]
+    ]
+    assert moves[-1] == (["a"], "lgt", 1)
+    assert a.isValid()
+    assert model.node_at(a).name == "a"
+    assert model.path_at(a) == "/world/lgt/a"
+
+    # Reorder within one parent, forwards then backwards.
+    assert model.move_nodes(["key"], "lgt", 2)
+    assert model.to_lists()[0][2] == ["lgt", ["a"], ["key"]]
+    assert moves[-1] == (["key"], "lgt", 1)
+    assert model.move_nodes(["key"], "lgt", 0)
+    assert model.to_lists()[0][2] == ["lgt", ["key"], ["a"]]
+    assert moves[-1] == (["key"], "lgt", 0)
+
+    # Already in place: nothing moves and nothing is emitted.
+    count = len(moves)
+    assert not model.move_nodes(["key"], "lgt", 0)
+    assert not model.move_nodes(["key"], "lgt", 1)
+    assert not model.move_nodes(["a"], "lgt", -1)
+    assert len(moves) == count
+
+
+def test_scene_graph_move_many_keeps_tree_order() -> None:
+    model = SceneGraphModel([["r", ["a"], ["b"], ["c"], ["d"]], ["s", ["x"]]])
+    moves: list[tuple[list[str], str, int]] = []
+    model.nodesMoved.connect(
+        lambda names, parent, row: moves.append((names, parent, row))
+    )
+
+    # Names arrive in selection order; the move keeps tree order.
+    assert model.move_nodes(["c", "a"], "r", 4)
+    assert model.to_lists()[0] == ["r", ["b"], ["d"], ["a"], ["c"]]
+    assert moves[-1] == (["a", "c"], "r", 2)
+
+    assert model.move_nodes(["x", "d"], "r", 0)
+    assert model.to_lists() == [["r", ["d"], ["x"], ["b"], ["a"], ["c"]], ["s"]]
+    assert moves[-1] == (["d", "x"], "r", 0)
+
+    # A node and its descendant: only the ancestor moves, to the root.
+    assert model.move_nodes(["b", "r"], "", 2)
+    assert model.to_lists() == [["s"], ["r", ["d"], ["x"], ["b"], ["a"], ["c"]]]
+    assert moves[-1] == (["r"], "", 1)
+
+
+def test_scene_graph_move_rejects_invalid_targets() -> None:
+    model = SceneGraphModel(MOVE_FOREST)
+    assert not model.can_move_nodes(["geo"], "a")  # into own descendant
+    assert not model.can_move_nodes(["geo"], "geo")  # onto itself
+    assert not model.can_move_nodes(["missing"], "lgt")
+    assert not model.can_move_nodes(["a"], "missing")
+    assert not model.can_move_nodes([], "lgt")
+    assert not model.move_nodes(["geo"], "a")
+    assert model.to_lists() == MOVE_FOREST
+
+
+def test_scene_graph_move_filter_vetoes() -> None:
+    model = SceneGraphModel(MOVE_FOREST)
+    calls: list[tuple[list[str], str, int]] = []
+
+    def accept(names: list[str], parent: str, row: int) -> bool:
+        calls.append((names, parent, row))
+        return parent != "lgt"
+
+    model.set_move_filter(accept)
+    # The filter sees top-most names only and a concrete row for appends.
+    assert not model.can_move_nodes(["a", "geo"], "lgt")
+    assert calls[-1] == (["geo"], "lgt", 1)
+    assert not model.move_nodes(["a"], "lgt")
+    assert model.to_lists() == MOVE_FOREST
+    assert model.move_nodes(["key"], "geo", 0)
+    assert calls[-1] == (["key"], "geo", 0)
+    model.set_move_filter(None)
+    assert model.can_move_nodes(["a"], "lgt")
+
+
+def test_scene_graph_mime_drop_protocol() -> None:
+    model = SceneGraphModel(MOVE_FOREST)
+    assert model.supportedDropActions() == Qt.DropAction.MoveAction
+    assert model.mimeTypes() == [SCENE_GRAPH_MIME_TYPE]
+    a = model.index_for_name("a")
+    lgt = model.index_for_name("lgt")
+    assert model.flags(a) & Qt.ItemFlag.ItemIsDragEnabled
+    assert model.flags(lgt) & Qt.ItemFlag.ItemIsDropEnabled
+    assert model.flags(QModelIndex()) == Qt.ItemFlag.ItemIsDropEnabled
+
+    data = model.mimeData([a, a])
+    assert data.hasFormat(SCENE_GRAPH_MIME_TYPE)
+    move = Qt.DropAction.MoveAction
+    assert model.canDropMimeData(data, move, -1, 0, lgt)
+    assert not model.canDropMimeData(data, Qt.DropAction.CopyAction, -1, 0, lgt)
+    assert not model.canDropMimeData(data, move, -1, 0, a)
+    assert model.dropMimeData(data, move, 0, 0, lgt)
+    assert model.to_lists()[0][2] == ["lgt", ["a"], ["key"]]
+    # The view asks to remove the dragged rows after a move; refuse.
+    assert not model.removeRows(0, 1, lgt)
+    assert model.rowCount(lgt) == 2
+
+    # Foreign payloads and another model's drags are refused.
+    assert not model.canDropMimeData(QMimeData(), move, -1, 0, lgt)
+    assert not model.canDropMimeData(None, move, -1, 0, lgt)
+    other = SceneGraphModel(MOVE_FOREST)
+    foreign = other.mimeData([other.index_for_name("a")])
+    assert not model.canDropMimeData(foreign, move, -1, 0, lgt)
+    garbage = QMimeData()
+    garbage.setData(SCENE_GRAPH_MIME_TYPE, QByteArray(b"not json"))
+    assert not model.canDropMimeData(garbage, move, -1, 0, lgt)
+
+
+def test_scene_graph_move_with_view_when_destination_row_shifts(qtbot) -> None:
+    """Moving siblings that precede the destination must not crash the view.
+
+    Regression: a cached destination index went stale after the first move
+    shifted the destination's own row, and ``endMoveRows`` segfaulted.
+    """
+    model = SceneGraphModel(
+        [["n0", ["n5"]], ["n1", ["n4"]], ["n2"], ["n3", ["n7"]], ["n6"]]
+    )
+    view = QTreeView()
+    qtbot.addWidget(view)
+    view.setModel(model)
+    view.expandAll()
+    n2 = QPersistentModelIndex(model.index_for_name("n2"))
+
+    assert model.move_nodes(["n1", "n3", "n5"], "n2", 3)
+    assert model.to_lists() == [
+        ["n0"],
+        ["n2", ["n5"], ["n1", ["n4"]], ["n3", ["n7"]]],
+        ["n6"],
+    ]
+    assert n2.isValid()
+    assert model.node_at(n2).name == "n2"
+    assert view.isExpanded(model.index_for_name("n1"))

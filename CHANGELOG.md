@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `SceneGraphTree` reparents and reorders by drag and drop when
+  `drag_drop=True` (or `set_drag_drop_enabled`). Drop on a row to append
+  under it, or between rows to reorder; `nodesMoved` reports the move, and
+  `set_move_filter` lets the host veto a target while hovering.
+  `SceneGraphModel.move_nodes` does the same move without a drag, with
+  proper `rowsMoved` notifications.
+- Scene viewport: drag transforms in the tree to reparent them (world pose
+  kept, as with P / Shift+P) or reorder siblings. Drop on the `geo` or
+  `lgt` folder to unparent. Each drop is one undo step, and the new order
+  is saved with the scene. Model files dropped on the tree still import.
 - Scene viewport import gaps closed:
   - Textured mode (6) also uses glTF roughness/metal, normal, and emissive
     maps. Normal-mapped meshes get computed tangents, so normal maps work

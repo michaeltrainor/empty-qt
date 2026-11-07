@@ -129,6 +129,20 @@ tree.selectedNamesChanged.connect(print)
 tree.set_selected_names(["geo", "lgt"])
 ```
 
+### Drag and drop
+
+Pass `drag_drop=True`, or call `set_drag_drop_enabled(True)`, and rows can be dragged. Dropping on a row makes the dragged rows its last children and expands it. Dropping between rows reorders them in that parent. A multi-selection keeps its tree order, a row can't be dropped into itself or a descendant, and a row whose ancestor is also dragged moves with the ancestor.
+
+The model does the move with proper `rowsMoved` notifications, so persistent indexes and the selection follow. `nodesMoved` then emits `(names, parent, row)`: the top-most moved UIDs in their new order, the new parent's UID (`""` for the forest root), and the row of the first moved node. `set_move_filter` installs a `(names, parent, row) -> bool` veto that runs while the cursor hovers, so a rejected target shows a forbidden cursor. Keep it cheap. `SceneGraphModel.move_nodes` and `can_move_nodes` offer the same move without a drag.
+
+```python
+tree = SceneGraphTree(forest, parent=window, drag_drop=True)
+tree.set_move_filter(lambda names, parent, row: parent != "")
+tree.nodesMoved.connect(lambda names, parent, row: print(names, "->", parent, row))
+```
+
+The scene viewport uses this to reparent transforms while keeping their world pose, records one undo step per drop, and rebuilds the tree from its own store afterwards.
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.

@@ -1,7 +1,8 @@
 """Standalone window for :class:`~mtqt.SceneGraphTree`.
 
-Shows a small nested forest and a read-only log of ``currentNameChanged``.
-Launch this instead of the gallery when debugging the scene tree on its own.
+Shows a small nested forest and a read-only log of ``currentNameChanged``
+and ``nodesMoved``. Drag rows to reparent or reorder them. Launch this
+instead of the gallery when debugging the scene tree on its own.
 """
 
 from __future__ import annotations
@@ -18,13 +19,18 @@ class SceneGraphTreeWindow(QMainWindow):
         self.resize(640, 480)
 
         central = QWidget(self)
-        forest = [["world", ["camera", "geo"]], ["light"]]
-        tree = SceneGraphTree(forest, central)
+        forest = [["world", ["camera"], ["geo", ["cube"], ["sphere"]]], ["light"]]
+        tree = SceneGraphTree(forest, central, drag_drop=True)
         log = QPlainTextEdit(central)
         log.setReadOnly(True)
-        log.setPlaceholderText("Selection log")
+        log.setPlaceholderText("Selection and move log")
         tree.currentNameChanged.connect(
             lambda name: log.appendPlainText(f"currentNameChanged: {name!r}")
+        )
+        tree.nodesMoved.connect(
+            lambda names, parent, row: log.appendPlainText(
+                f"nodesMoved: {names!r} -> {parent!r} row {row}"
+            )
         )
 
         layout = QVBoxLayout(central)
