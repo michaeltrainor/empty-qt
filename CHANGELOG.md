@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Scene viewport: import glTF/GLB, OBJ, STL, and PLY models with File →
+  Import… or by dropping files on the window. glTF files keep their node
+  hierarchy and names, and materials bring their base color, roughness,
+  and metalness. Scenes save the model paths relative to the scene file;
+  a missing model opens as a placeholder box with a warning. Adds `trimesh`
+  to the app's dependencies.
 - `SceneGraphTree` keeps its navigation keys (arrows, Home, End, Page
   Up/Down, alone or with Shift) while it has focus, even when the host
   window binds them as shortcuts. In the scene viewport, Home moves to the

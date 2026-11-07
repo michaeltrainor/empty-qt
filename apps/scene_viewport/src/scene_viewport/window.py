@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
-from PySide6.QtCore import QKeyCombination, Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtCore import QKeyCombination, QMimeData, Qt
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
@@ -35,7 +44,14 @@ from scene_viewport.components import (
 )
 from scene_viewport.gizmo import InteractionTool
 from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
+from scene_viewport.mesh.importer import (
+    IMPORT_SUFFIXES,
+    ModelImportError,
+    importable_paths,
+    load_model,
+)
 from scene_viewport.mesh.types import PrimitiveKind
+from scene_viewport.model_import import ImportResult, import_objects
 from scene_viewport.navigation import NAVIGATION_HINTS
 from scene_viewport.scene import (
     FOLDER_NAMES,
@@ -145,6 +161,7 @@ class SceneViewportWindow(QMainWindow):
         self._grid_action: QAction | None = None
         self._nav_label: QLabel | None = None
         self._scene_path: Path | None = None
+        self._import_dir: Path | None = None
         self._visibility_backup: dict[str, bool] | None = None
 
         transforms = transform_components()
@@ -194,6 +211,8 @@ class SceneViewportWindow(QMainWindow):
         self._props.register_handler(self._on_prop_field)
         self._props.fieldPreviewed.connect(self._on_prop_preview)
         self._install_menus()
+        # Model files dropped anywhere on the window are imported.
+        self.setAcceptDrops(True)
         self._install_toolbar()
         self._install_status_bar()
 
@@ -218,6 +237,11 @@ class SceneViewportWindow(QMainWindow):
         save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
         save_as_action.triggered.connect(self._save_scene_as)
         file_menu.addAction(save_as_action)
+        file_menu.addSeparator()
+
+        import_action = QAction("Import...", self)
+        import_action.triggered.connect(self._import_dialog)
+        file_menu.addAction(import_action)
 
         create_menu = self.menuBar().addMenu("&Create")
         create_menu.addAction("Empty Transform", self._create_empty)
@@ -833,6 +857,8 @@ class SceneViewportWindow(QMainWindow):
         """Replace the live scene with ``document`` and clear history."""
         for name in list(self._world.transforms):
             self._unregister_transform(name)
+        # Report only the files the new scene fails to load.
+        self._viewport.take_missing_sources()
         self._visibility_backup = None
         self._history.clear()
         for transform in self._sorted_transforms(document.transforms):
@@ -877,6 +903,92 @@ class SceneViewportWindow(QMainWindow):
             return
         self._replace_scene(document)
         self._set_scene_path(path)
+        missing = self._viewport.take_missing_sources()
+        if missing:
+            listed = "\n".join(str(source) for source in missing)
+            QMessageBox.warning(
+                self,
+                "Open Scene",
+                "These model files could not be loaded and are shown as boxes:\n"
+                + listed,
+            )
+
+    def _import_dialog(self) -> None:
+        patterns = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
+        start = self._import_dir or (
+            self._scene_path.parent if self._scene_path is not None else Path.home()
+        )
+        path_strs, _filter = QFileDialog.getOpenFileNames(
+            self,
+            "Import",
+            str(start),
+            f"3D models ({patterns})",
+        )
+        if not path_strs:
+            return
+        paths = [Path(path_str) for path_str in path_strs]
+        self._import_dir = paths[0].parent
+        self._import_files(paths)
+
+    def _import_files(self, paths: Sequence[Path]) -> list[str]:
+        """Import model files as one undo step; return the new root names."""
+        used = self._used_names()
+        results: list[ImportResult] = []
+        failures: list[str] = []
+        for path in paths:
+            try:
+                model = load_model(path)
+            except ModelImportError as exc:
+                failures.append(str(exc))
+                continue
+            results.append(import_objects(model, used, space=self._edit_space))
+        roots = [result.root for result in results]
+        if results:
+            transforms = [t for result in results for t in result.objects.transforms]
+            meshes = [m for result in results for m in result.objects.meshes]
+            for transform in transforms:
+                self._register_transform(transform)
+            for mesh in meshes:
+                self._register_mesh(mesh)
+            self._history.push(
+                HistoryStep(
+                    label="Import",
+                    added=SceneObjects(
+                        transforms=[t.model_copy(deep=True) for t in transforms],
+                        meshes=[m.model_copy(deep=True) for m in meshes],
+                    ),
+                )
+            )
+            self._rebuild_tree(roots)
+            # Models come in any size (often millimetres), so show them.
+            self._viewport.frame_selection(roots)
+        if failures:
+            QMessageBox.warning(
+                self,
+                "Import",
+                "Could not import:\n" + "\n".join(failures),
+            )
+        return roots
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if dropped_models(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if dropped_models(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = dropped_models(event.mimeData())
+        if not paths:
+            super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        self._import_files(paths)
 
     def _save_scene(self) -> None:
         if self._scene_path is None:
@@ -1424,6 +1536,23 @@ class SceneViewportWindow(QMainWindow):
         finally:
             self._syncing = False
         self._sync_properties(names)
+
+
+def dropped_models(mime: QMimeData | None) -> list[Path]:
+    """Return the importable local model files in drag-and-drop data.
+
+    Args:
+        mime: Data of a drag or drop event.
+
+    Returns:
+        Existing files with a supported suffix, in drop order.
+    """
+    if mime is None or not mime.hasUrls():
+        return []
+    local: Iterable[Path] = (
+        Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()
+    )
+    return importable_paths(local)
 
 
 def main() -> int:
