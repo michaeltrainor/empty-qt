@@ -638,6 +638,135 @@ class ImportedLight:
     outer_cone: float = math.pi / 4
 
 
+@dataclass(frozen=True, slots=True)
+class ImportedCamera:
+    """A glTF camera on a node.
+
+    trimesh folds camera nodes into its own ``scene.camera`` and drops them
+    from the graph, so the node's parent and local matrix are kept here for
+    the importer to rebuild the node.
+
+    Args:
+        node: trimesh node name the camera sits on.
+        kind: ``perspective`` or ``orthographic``.
+        yfov: Vertical field of view in radians (perspective).
+        ymag: Half the visible height (orthographic).
+        znear: Near clip distance.
+        zfar: Far clip distance, or ``0.0`` for an infinite perspective.
+        parent: trimesh name of the parent node, or ``""`` for a root node.
+        matrix: The node's local 4x4 matrix.
+    """
+
+    node: str
+    kind: str
+    yfov: float = math.radians(50.0)
+    ymag: float = 5.0
+    znear: float = 0.1
+    zfar: float = 0.0
+    parent: str = ""
+    matrix: NDArray[np.float64] = field(default_factory=lambda: np.eye(4))
+
+
+def _node_matrix(node: Mapping[str, object]) -> NDArray[np.float64]:
+    """Return a node's local matrix from ``matrix`` or its TRS fields."""
+    raw = node.get("matrix")
+    if isinstance(raw, list) and len(raw) == 16:
+        return np.asarray(raw, dtype=np.float64).reshape(4, 4).T  # column major
+    translation = node.get("translation")
+    rotation = node.get("rotation")
+    scale = node.get("scale")
+    matrix = np.eye(4)
+    if isinstance(scale, list) and len(scale) == 3:
+        matrix = matrix @ np.diag([*map(float, scale), 1.0])
+    if isinstance(rotation, list) and len(rotation) == 4:
+        x, y, z, w = (float(v) for v in rotation)
+        rot = np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+            ]
+        )
+        full = np.eye(4)
+        full[:3, :3] = rot
+        matrix = full @ matrix
+    if isinstance(translation, list) and len(translation) == 3:
+        move = np.eye(4)
+        move[:3, 3] = [float(v) for v in translation]
+        matrix = move @ matrix
+    return matrix
+
+
+def _node_names(document: GltfDocument) -> list[str]:
+    """Node names as trimesh assigns them: unique, index as the fallback."""
+    names: dict[str, int] = {}
+    counts: dict[str | None, int] = {}
+    result: list[str] = []
+    for index, node in enumerate(document.entries("nodes")):
+        name = unique_name(str(node.get("name", index)), names, counts=counts)
+        names[name] = index
+        result.append(name)
+    return result
+
+
+def read_cameras(document: GltfDocument) -> list[ImportedCamera]:
+    """Return the file's cameras, keyed by trimesh node name.
+
+    Args:
+        document: An open glTF document.
+    """
+    definitions = document.entries("cameras")
+    cameras: list[ImportedCamera] = []
+    nodes = document.entries("nodes")
+    names = _node_names(document)
+    parents: dict[int, int] = {}
+    for parent_index, node in enumerate(nodes):
+        children = node.get("children")
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, int):
+                    parents[child] = parent_index
+    for index, (name, node) in enumerate(zip(names, nodes, strict=True)):
+        camera_index = node.get("camera")
+        if not isinstance(camera_index, int):
+            continue
+        if not 0 <= camera_index < len(definitions):
+            continue
+        definition = definitions[camera_index]
+        kind = definition.get("type")
+        parent = names[parents[index]] if index in parents else ""
+        matrix = _node_matrix(node)
+        if kind == "perspective":
+            values = definition.get("perspective")
+            values = values if isinstance(values, dict) else {}
+            cameras.append(
+                ImportedCamera(
+                    node=name,
+                    kind="perspective",
+                    yfov=_number(values.get("yfov"), math.radians(50.0)),
+                    znear=_number(values.get("znear"), 0.1),
+                    zfar=_number(values.get("zfar"), 0.0),
+                    parent=parent,
+                    matrix=matrix,
+                )
+            )
+        elif kind == "orthographic":
+            values = definition.get("orthographic")
+            values = values if isinstance(values, dict) else {}
+            cameras.append(
+                ImportedCamera(
+                    node=name,
+                    kind="orthographic",
+                    ymag=_number(values.get("ymag"), 5.0),
+                    znear=_number(values.get("znear"), 0.1),
+                    zfar=_number(values.get("zfar"), 500.0),
+                    parent=parent,
+                    matrix=matrix,
+                )
+            )
+    return cameras
+
+
 def read_lights(document: GltfDocument) -> list[ImportedLight]:
     """Return the file's punctual lights, keyed by trimesh node name.
 
@@ -657,11 +786,9 @@ def read_lights(document: GltfDocument) -> list[ImportedLight]:
     if not isinstance(definitions, list):
         return []
     lights: list[ImportedLight] = []
-    names: dict[str, int] = {}
-    counts: dict[str | None, int] = {}
-    for index, node in enumerate(document.entries("nodes")):
-        name = unique_name(str(node.get("name", index)), names, counts=counts)
-        names[name] = index
+    for name, node in zip(
+        _node_names(document), document.entries("nodes"), strict=True
+    ):
         node_extensions = node.get("extensions")
         if not isinstance(node_extensions, dict):
             continue

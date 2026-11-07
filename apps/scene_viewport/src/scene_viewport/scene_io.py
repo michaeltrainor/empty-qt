@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     TransformComponent,
@@ -22,12 +23,14 @@ class SceneDocument(BaseModel):
         transforms: Transform components (parents before children preferred).
         meshes: Mesh shapes referencing transform names.
         lights: Light shapes referencing transform names.
+        cameras: Camera shapes referencing transform names.
     """
 
     version: int = Field(default=1, ge=1)
     transforms: list[TransformComponent] = Field(default_factory=list)
     meshes: list[MeshComponent] = Field(default_factory=list)
     lights: list[LightComponent] = Field(default_factory=list)
+    cameras: list[CameraComponent] = Field(default_factory=list)
 
 
 def load_scene(path: Path) -> SceneDocument:

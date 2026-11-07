@@ -40,6 +40,8 @@ from mtqt import (
     ensure_application,
 )
 from scene_viewport.components import (
+    CameraComponent,
+    CameraKind,
     LightComponent,
     LightKind,
     MeshComponent,
@@ -82,6 +84,7 @@ from scene_viewport.viewport import (
     attach_viewport,
 )
 from scene_viewport.world import SceneWorld
+from scene_viewport.xform_math import look_at_trs
 
 _log = logging.getLogger(__name__)
 
@@ -185,6 +188,7 @@ class SceneViewportWindow(QMainWindow):
         self._draw_mode_actions: dict[str, QAction] = {}
         self._pivot_action: QAction | None = None
         self._grid_action: QAction | None = None
+        self._look_through_action: QAction | None = None
         self._nav_label: QLabel | None = None
         self._scene_path: Path | None = None
         self._import_dir: Path | None = None
@@ -310,6 +314,14 @@ class SceneViewportWindow(QMainWindow):
         lights.addAction("Point Light", lambda: self._create_light("point"))
         lights.addAction("Spot Light", lambda: self._create_light("spot"))
 
+        cameras = create_menu.addMenu("Cameras")
+        cameras.addAction(
+            "Perspective Camera", lambda: self._create_camera("perspective")
+        )
+        cameras.addAction(
+            "Orthographic Camera", lambda: self._create_camera("orthographic")
+        )
+
         edit_menu = self.menuBar().addMenu("&Edit")
         undo_action = QAction("Undo", self)
         undo_action.setShortcut(QKeySequence.StandardKey.Undo)
@@ -394,6 +406,16 @@ class SceneViewportWindow(QMainWindow):
         frame_all_action.setShortcuts([QKeySequence("A"), QKeySequence("Home")])
         frame_all_action.triggered.connect(lambda: self._viewport.frame_selection([]))
         view_menu.addAction(frame_all_action)
+        view_menu.addSeparator()
+
+        self._look_through_action = QAction("Look Through Camera", self)
+        self._look_through_action.setCheckable(True)
+        self._look_through_action.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        self._look_through_action.setStatusTip(
+            "Render from the selected camera; toggle again for the free camera"
+        )
+        self._look_through_action.triggered.connect(self._toggle_look_through)
+        view_menu.addAction(self._look_through_action)
         view_menu.addSeparator()
 
         # Blender numpad layout; menu entries cover keyboards without one.
@@ -568,6 +590,10 @@ class SceneViewportWindow(QMainWindow):
         parts = [selection, self._viewport.interaction_tool.capitalize()]
         if self._viewport.snap_enabled:
             parts.append("Snap on")
+        looking = self._viewport.looking_through
+        if looking is not None:
+            parts.append(f"Looking through {looking} (Ctrl+Shift+L exits)")
+        self._sync_look_through_action()
         self.statusBar().showMessage(" · ".join(parts))
 
     def _set_snap(self, enabled: bool) -> None:
@@ -640,6 +666,7 @@ class SceneViewportWindow(QMainWindow):
             self._world.iter_transforms(),
             self._world.iter_meshes(),
             self._world.iter_lights(),
+            self._world.iter_cameras(),
         )
         self._syncing = True
         try:
@@ -667,13 +694,78 @@ class SceneViewportWindow(QMainWindow):
         self._world.add_light(component)
         self._viewport.add_light(component)
 
+    def _register_camera(self, component: CameraComponent) -> None:
+        self._world.add_camera(component)
+        self._viewport.add_camera(component)
+
     def _unregister_transform(self, name: str) -> None:
         for mesh_name in self._world.meshes_on(name):
             self._viewport.remove_mesh(mesh_name)
         for light_name in self._world.lights_on(name):
             self._viewport.remove_light(light_name)
+        for camera_name in self._world.cameras_on(name):
+            self._viewport.remove_camera(camera_name)
         self._viewport.remove_transform(name)
         self._world.remove_transform(name)
+
+    def _create_camera(self, kind: CameraKind) -> None:
+        """Add a camera on a new transform, aimed at the scene from the front."""
+        name = self._unique_name("camera")
+        shape = f"{name}Shape"
+        position, rotation, _scale = look_at_trs((5.5, 4.0, 6.5), (0.0, 0.4, 0.0))
+        transform = TransformComponent(
+            name=name,
+            parent=self._selected_parent(),
+            space=self._edit_space,
+            position=position,
+            rotation=rotation,
+        )
+        camera = CameraComponent(name=shape, transform=name, kind=kind)
+        self._register_transform(transform)
+        self._register_camera(camera)
+        self._history.push(
+            HistoryStep(
+                label=f"Create {kind} camera",
+                added=SceneObjects(
+                    transforms=[transform.model_copy(deep=True)],
+                    cameras=[camera.model_copy(deep=True)],
+                ),
+            )
+        )
+        self._rebuild_tree([name])
+
+    def _selected_camera(self) -> str | None:
+        """Return the camera on the primary selected transform, if any."""
+        for name in reversed(self._viewport.selected_names):
+            cameras = self._world.cameras_on(name)
+            if cameras:
+                return cameras[0]
+        return None
+
+    def _toggle_look_through(self, checked: bool) -> None:
+        """Look through the selected camera, or return to the free camera."""
+        if not checked:
+            self._viewport.look_through(None)
+        else:
+            camera = self._selected_camera()
+            if camera is None:
+                action = self._look_through_action
+                if action is not None:
+                    action.setChecked(False)
+                self.statusBar().showMessage("Select a camera to look through", 4000)
+                return
+            self._viewport.look_through(camera)
+        self._update_status()
+
+    def _sync_look_through_action(self) -> None:
+        """Keep the View menu toggle in step with the viewport."""
+        if self._look_through_action is None:
+            return
+        looking = self._viewport.looking_through is not None
+        if self._look_through_action.isChecked() != looking:
+            self._look_through_action.blockSignals(True)
+            self._look_through_action.setChecked(looking)
+            self._look_through_action.blockSignals(False)
 
     def _create_empty(self) -> None:
         name = self._unique_name("null")
@@ -774,6 +866,7 @@ class SceneViewportWindow(QMainWindow):
         ]
         removed_meshes: list[MeshComponent] = []
         removed_lights: list[LightComponent] = []
+        removed_cameras: list[CameraComponent] = []
         for name in to_remove:
             for mesh_name in self._world.meshes_on(name):
                 mesh = self._world.meshes.get(mesh_name)
@@ -783,6 +876,10 @@ class SceneViewportWindow(QMainWindow):
                 light = self._world.lights.get(light_name)
                 if light is not None:
                     removed_lights.append(light.model_copy(deep=True))
+            for camera_name in self._world.cameras_on(name):
+                camera = self._world.cameras.get(camera_name)
+                if camera is not None:
+                    removed_cameras.append(camera.model_copy(deep=True))
             self._unregister_transform(name)
         self._history.push(
             HistoryStep(
@@ -791,6 +888,7 @@ class SceneViewportWindow(QMainWindow):
                     transforms=removed_transforms,
                     meshes=removed_meshes,
                     lights=removed_lights,
+                    cameras=removed_cameras,
                 ),
             )
         )
@@ -866,8 +964,16 @@ class SceneViewportWindow(QMainWindow):
             return False
         if parent == "lgt":
             return all(self._world.lights_on(name) for name in names)
+        if parent == "cam":
+            return all(
+                self._world.cameras_on(name) and not self._world.lights_on(name)
+                for name in names
+            )
         if parent == "geo":
-            return not any(self._world.lights_on(name) for name in names)
+            return not any(
+                self._world.lights_on(name) or self._world.cameras_on(name)
+                for name in names
+            )
         return parent in transforms
 
     def _tree_transform_order(self) -> list[str]:
@@ -983,6 +1089,8 @@ class SceneViewportWindow(QMainWindow):
             self._register_mesh(mesh)
         for light in document.lights:
             self._register_light(light)
+        for camera in document.cameras:
+            self._register_camera(camera)
         self._rebuild_tree([])
         self._saved_document = self._world.to_document()
 
@@ -1295,12 +1403,15 @@ class SceneViewportWindow(QMainWindow):
             transforms = [t for result in results for t in result.objects.transforms]
             meshes = [m for result in results for m in result.objects.meshes]
             lights = [light for result in results for light in result.objects.lights]
+            cameras = [cam for result in results for cam in result.objects.cameras]
             for transform in transforms:
                 self._register_transform(transform)
             for mesh in meshes:
                 self._register_mesh(mesh)
             for light in lights:
                 self._register_light(light)
+            for camera in cameras:
+                self._register_camera(camera)
             self._history.push(
                 HistoryStep(
                     label="Import",
@@ -1308,6 +1419,7 @@ class SceneViewportWindow(QMainWindow):
                         transforms=[t.model_copy(deep=True) for t in transforms],
                         meshes=[m.model_copy(deep=True) for m in meshes],
                         lights=[light.model_copy(deep=True) for light in lights],
+                        cameras=[cam.model_copy(deep=True) for cam in cameras],
                     ),
                 )
             )
@@ -1480,6 +1592,7 @@ class SceneViewportWindow(QMainWindow):
         added_transforms: list[TransformComponent] = []
         added_meshes: list[MeshComponent] = []
         added_lights: list[LightComponent] = []
+        added_cameras: list[CameraComponent] = []
         for name in to_copy:
             src = self._world.transforms[name]
             new_parent = name_map.get(src.parent, src.parent)
@@ -1511,6 +1624,14 @@ class SceneViewportWindow(QMainWindow):
                 )
                 self._register_light(new_light)
                 added_lights.append(new_light.model_copy(deep=True))
+            for camera_name in self._world.cameras_on(name):
+                camera = self._world.cameras[camera_name]
+                new_camera_name = self._unique_name(f"{name_map[name]}Shape")
+                new_camera = camera.model_copy(
+                    update={"name": new_camera_name, "transform": name_map[name]}
+                )
+                self._register_camera(new_camera)
+                added_cameras.append(new_camera.model_copy(deep=True))
 
         self._history.push(
             HistoryStep(
@@ -1519,6 +1640,7 @@ class SceneViewportWindow(QMainWindow):
                     transforms=added_transforms,
                     meshes=added_meshes,
                     lights=added_lights,
+                    cameras=added_cameras,
                 ),
             )
         )
@@ -1637,6 +1759,12 @@ class SceneViewportWindow(QMainWindow):
             else:
                 self._world.lights[light.name] = light
                 self._viewport.apply_light(light)
+        for camera in objects.cameras:
+            if camera.name not in self._world.cameras:
+                self._register_camera(camera)
+            else:
+                self._world.cameras[camera.name] = camera
+                self._viewport.apply_camera(camera)
 
     def _remove_objects(self, objects: SceneObjects) -> None:
         names = [item.name for item in objects.transforms]
@@ -1743,6 +1871,8 @@ class SceneViewportWindow(QMainWindow):
             pages.append(("Mesh", self._world.meshes[mesh_name]))
         for light_name in self._world.lights_on(name):
             pages.append(("Light", self._world.lights[light_name]))
+        for camera_name in self._world.cameras_on(name):
+            pages.append(("Camera", self._world.cameras[camera_name]))
         return pages
 
     def _on_prop_field(
@@ -1758,6 +1888,10 @@ class SceneViewportWindow(QMainWindow):
         if isinstance(model, LightComponent):
             self._world.lights[model.name] = model
             self._viewport.apply_light(model)
+            return
+        if isinstance(model, CameraComponent):
+            self._world.cameras[model.name] = model
+            self._viewport.apply_camera(model)
             return
         if not isinstance(model, TransformComponent):
             return

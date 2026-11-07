@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     TransformComponent,
@@ -18,6 +19,7 @@ class SceneObjects:
     transforms: list[TransformComponent] = field(default_factory=list)
     meshes: list[MeshComponent] = field(default_factory=list)
     lights: list[LightComponent] = field(default_factory=list)
+    cameras: list[CameraComponent] = field(default_factory=list)
 
 
 @dataclass

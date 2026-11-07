@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import weakref
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Literal
 import numpy as np
 import pygfx as gfx
 import pylinalg as la
+from numpy.typing import NDArray
 from PySide6.QtWidgets import QWidget  # noqa: F401  # select Qt before rendercanvas
 from rendercanvas.qt import QRenderWidget
 
@@ -23,6 +25,7 @@ from scene_viewport.box_select import (
     selection_after_box,
 )
 from scene_viewport.components import (
+    CameraComponent,
     LightComponent,
     MeshComponent,
     TransformComponent,
@@ -70,10 +73,60 @@ _BBOX_COLOR = "#c8c8c8"
 _BBOX_SELECTED_COLOR = "#5eb0ff"
 _PERSPECTIVE_FOV = 50.0
 _BOX_COLOR = "#e6e6e6"
+_CAMERA_HELPER_COLOR = "#f2c14e"
+#: Length of a camera helper's frustum along -Z, in scene units.
+_CAMERA_HELPER_DEPTH = 1.5
 
 Vec3 = tuple[float, float, float]
 
 _log = logging.getLogger(__name__)
+
+
+def _frustum_lines(component: CameraComponent) -> NDArray[np.float32]:
+    """Line segments (pairs of points) drawing a camera's frustum and up mark.
+
+    The frustum runs from the origin along -Z, sized by the field of view
+    (perspective) or the ortho size, at a fixed 16:9 aspect. A small
+    triangle on top marks the camera's up direction.
+    """
+    depth = _CAMERA_HELPER_DEPTH
+    if component.kind == "orthographic":
+        half_h = component.ortho_size * 0.5
+        half_w = half_h * 16 / 9
+        near_rect = [
+            (-half_w, -half_h, 0.0),
+            (half_w, -half_h, 0.0),
+            (half_w, half_h, 0.0),
+            (-half_w, half_h, 0.0),
+        ]
+    else:
+        half_h = math.tan(math.radians(component.fov) * 0.5) * depth
+        half_w = half_h * 16 / 9
+        near_rect = [(0.0, 0.0, 0.0)] * 4
+    far_rect = [
+        (-half_w, -half_h, -depth),
+        (half_w, -half_h, -depth),
+        (half_w, half_h, -depth),
+        (-half_w, half_h, -depth),
+    ]
+    segments: list[tuple[float, float, float]] = []
+    for index in range(4):
+        segments += [far_rect[index], far_rect[(index + 1) % 4]]
+        segments += [near_rect[index], far_rect[index]]
+    if component.kind == "orthographic":
+        for index in range(4):
+            segments += [near_rect[index], near_rect[(index + 1) % 4]]
+    # Up triangle above the far rectangle.
+    segments += [
+        (-half_w * 0.5, half_h, -depth),
+        (half_w * 0.5, half_h, -depth),
+        (half_w * 0.5, half_h, -depth),
+        (0.0, half_h * 1.6, -depth),
+        (0.0, half_h * 1.6, -depth),
+        (-half_w * 0.5, half_h, -depth),
+    ]
+    return np.asarray(segments, dtype=np.float32)
+
 
 # pygfx ships no type annotations, so pyright infers each parameter from its
 # default value: `intensity=1` becomes `int`, and passing a float is flagged.
@@ -173,11 +226,16 @@ class ViewportController:
         self._bboxes: dict[str, gfx.Line] = {}
         self._lights: dict[str, gfx.Light] = {}
         self._light_helpers: dict[str, gfx.WorldObject] = {}
+        self._cameras: dict[str, gfx.PerspectiveCamera | gfx.OrthographicCamera] = {}
+        self._camera_helpers: dict[str, gfx.Line] = {}
         self._mesh_to_transform: dict[str, str] = {}
         self._light_to_transform: dict[str, str] = {}
+        self._camera_to_transform: dict[str, str] = {}
         self._helper_to_transform: dict[str, str] = {}
         self._transform_to_meshes: dict[str, list[str]] = {}
         self._transform_to_lights: dict[str, list[str]] = {}
+        self._transform_to_cameras: dict[str, list[str]] = {}
+        self._look_through: str | None = None
         self._updating = False
         self._interaction_tool: InteractionTool = "select"
         self._draw_mode: DrawMode = "shaded"
@@ -243,6 +301,7 @@ class ViewportController:
             self._pivots[transform.name] = transform.pivot
             self._transform_to_meshes[transform.name] = []
             self._transform_to_lights[transform.name] = []
+            self._transform_to_cameras[transform.name] = []
 
         for transform in transforms:
             group = self._groups[transform.name]
@@ -267,6 +326,9 @@ class ViewportController:
         self.camera.local.position = (5.5, 4.0, 6.5)
         self.camera.depth_range = (0.05, 500.0)
         self.camera.show_pos((0.0, 0.4, 0.0))
+        # The free camera the user orbits; ``camera`` switches to a scene
+        # camera while looking through one.
+        self._free_camera = self.camera
         self._camera_controller = gfx.OrbitController(
             self.camera,
             register_events=self.renderer,
@@ -803,12 +865,18 @@ class ViewportController:
         self._transform_to_lights[new_name] = self._transform_to_lights.pop(
             old_name, []
         )
+        self._transform_to_cameras[new_name] = self._transform_to_cameras.pop(
+            old_name, []
+        )
         for mesh_name, transform in list(self._mesh_to_transform.items()):
             if transform == old_name:
                 self._mesh_to_transform[mesh_name] = new_name
         for light_name, transform in list(self._light_to_transform.items()):
             if transform == old_name:
                 self._light_to_transform[light_name] = new_name
+        for camera_name, transform in list(self._camera_to_transform.items()):
+            if transform == old_name:
+                self._camera_to_transform[camera_name] = new_name
         for helper_name, transform in list(self._helper_to_transform.items()):
             if transform == old_name:
                 self._helper_to_transform[helper_name] = new_name
@@ -876,6 +944,7 @@ class ViewportController:
             names: Transform UIDs to frame. ``None`` uses the current
                 selection; an empty selection frames every transform.
         """
+        self.look_through(None)
         sphere = self._bounding_sphere(names)
         if sphere is not None:
             self._show_sphere(sphere)
@@ -896,6 +965,7 @@ class ViewportController:
         if view not in _VIEW_DIRECTIONS:
             msg = f"unsupported view {view!r}"
             raise ValueError(msg)
+        self.look_through(None)
         self.camera.fov = _PERSPECTIVE_FOV if view == "perspective" else 0.0
         sphere = self._bounding_sphere([]) or (0.0, 0.0, 0.0, 2.0)
         self._show_sphere(sphere, _VIEW_DIRECTIONS[view])
@@ -1030,6 +1100,7 @@ class ViewportController:
         self._pivots[component.name] = component.pivot
         self._transform_to_meshes[component.name] = []
         self._transform_to_lights[component.name] = []
+        self._transform_to_cameras[component.name] = []
         if component.parent:
             parent = self._groups.get(component.parent)
             if parent is None:
@@ -1125,6 +1196,137 @@ class ViewportController:
             parent.remove(light)
         self._canvas.request_draw()
 
+    def add_camera(self, component: CameraComponent) -> None:
+        """Add a camera shape under its transform, with a frustum helper.
+
+        Args:
+            component: Camera to add. ``name`` must be unique.
+        """
+        if component.name in self._cameras:
+            msg = f"camera already exists: {component.name!r}"
+            raise KeyError(msg)
+        group = self._groups.get(component.transform)
+        if group is None:
+            msg = f"camera {component.name!r} missing transform {component.transform!r}"
+            raise KeyError(msg)
+        camera: gfx.PerspectiveCamera | gfx.OrthographicCamera
+        if component.kind == "orthographic":
+            camera = gfx.OrthographicCamera(
+                component.ortho_size,  # pyright: ignore[reportArgumentType]
+                component.ortho_size,  # pyright: ignore[reportArgumentType]
+                depth_range=(component.near, component.far),
+            )
+        else:
+            camera = gfx.PerspectiveCamera(
+                component.fov,  # pyright: ignore[reportArgumentType]
+                16 / 9,  # pyright: ignore[reportArgumentType]
+                depth_range=(component.near, component.far),
+            )
+        camera.name = component.name
+        helper = gfx.Line(
+            gfx.Geometry(positions=_frustum_lines(component)),
+            gfx.LineSegmentMaterial(  # pyright: ignore[reportArgumentType]
+                thickness=1.5,
+                color=_CAMERA_HELPER_COLOR,
+                pick_write=True,
+            ),
+        )
+        helper.name = f"{component.name}Helper"
+        helper.add_event_handler(self._on_pickable_click, "click")
+        group.add(camera)
+        group.add(helper)
+        self._cameras[component.name] = camera
+        self._camera_helpers[component.name] = helper
+        self._camera_to_transform[component.name] = component.transform
+        self._transform_to_cameras.setdefault(component.transform, []).append(
+            component.name
+        )
+        self._helper_to_transform[helper.name] = component.transform
+        self._canvas.request_draw()
+
+    def remove_camera(self, name: str) -> None:
+        """Remove a camera shape and its helper; exits look-through if needed.
+
+        Args:
+            name: Camera component UID.
+        """
+        camera = self._cameras.pop(name, None)
+        if camera is None:
+            return
+        if self._look_through == name:
+            self.look_through(None)
+        helper = self._camera_helpers.pop(name, None)
+        transform = self._camera_to_transform.pop(name, None)
+        if transform is not None:
+            cameras = self._transform_to_cameras.get(transform, [])
+            if name in cameras:
+                cameras.remove(name)
+        for obj in (camera, helper):
+            if obj is None:
+                continue
+            if obj is helper:
+                self._helper_to_transform.pop(obj.name, None)
+            parent = obj.parent
+            if parent is not None:
+                parent.remove(obj)
+        self._canvas.request_draw()
+
+    def apply_camera(self, component: CameraComponent) -> None:
+        """Push lens fields from ``component`` onto its pygfx camera and helper."""
+        camera = self._cameras.get(component.name)
+        if camera is None:
+            return
+        if isinstance(camera, gfx.OrthographicCamera):
+            camera.width = component.ortho_size
+            camera.height = component.ortho_size
+        else:
+            camera.fov = component.fov
+        camera.depth_range = (component.near, component.far)
+        helper = self._camera_helpers.get(component.name)
+        if helper is not None:
+            helper.geometry = gfx.Geometry(positions=_frustum_lines(component))
+        self._canvas.request_draw()
+
+    @property
+    def looking_through(self) -> str | None:
+        """UID of the scene camera the viewport renders from, or ``None``."""
+        return self._look_through
+
+    def look_through(self, name: str | None) -> bool:
+        """Render from scene camera ``name``, or return to the free camera.
+
+        While looking through a camera, orbit navigation is off, the gizmo
+        is hidden, and that camera's frustum helper is hidden. Move the
+        camera with the Transform tab, or exit to use the gizmo.
+
+        Args:
+            name: Camera component UID, or ``None`` for the free camera.
+
+        Returns:
+            ``True`` when the view changed.
+        """
+        if name is not None and name not in self._cameras:
+            return False
+        if name == self._look_through:
+            return False
+        previous = self._look_through
+        if previous is not None:
+            helper = self._camera_helpers.get(previous)
+            if helper is not None:
+                helper.visible = True
+        self._look_through = name
+        if name is None:
+            self.camera = self._free_camera
+        else:
+            self.camera = self._cameras[name]
+            helper = self._camera_helpers.get(name)
+            if helper is not None:
+                helper.visible = False
+        self._camera_controller.enabled = name is None
+        self._gizmo.visible = name is None and bool(self._selected)
+        self._canvas.request_draw()
+        return True
+
     def remove_transform(self, name: str) -> None:
         """Remove a transform group (shapes must already be removed).
 
@@ -1136,6 +1338,7 @@ class ViewportController:
             return
         self._transform_to_meshes.pop(name, None)
         self._transform_to_lights.pop(name, None)
+        self._transform_to_cameras.pop(name, None)
         self._pivots.pop(name, None)
         self._selected.discard(name)
         if name in self._selected_order:
@@ -1653,6 +1856,11 @@ class ViewportController:
 
     def _sync_gizmo_target(self) -> None:
         if self._drag_active:
+            return
+        if self._look_through is not None:
+            # The gizmo is bound to the free camera; hide it while looking
+            # through a scene camera rather than draw it mis-tracked.
+            self._clear_gizmo()
             return
         if self._interaction_tool == "select" or not self._selected_order:
             self._clear_gizmo()
