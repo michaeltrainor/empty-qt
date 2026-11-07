@@ -24,6 +24,9 @@ class MeshBuffers:
         tangents: Optional ``(N, 4)`` tangents for normal mapping: the
             direction of +U, and in ``w`` the sign that gives the bitangent
             as ``cross(normal, tangent) * w``.
+        texcoords1: Optional second UV set, shape ``(N, 2)``.
+        colors: Optional per-vertex RGBA colors in ``[0, 1]``, shape
+            ``(N, 4)``.
     """
 
     positions: NDArray[np.float32]
@@ -31,3 +34,5 @@ class MeshBuffers:
     indices: NDArray[np.uint32]
     texcoords: NDArray[np.float32]
     tangents: NDArray[np.float32] | None = None
+    texcoords1: NDArray[np.float32] | None = None
+    colors: NDArray[np.float32] | None = None

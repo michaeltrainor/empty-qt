@@ -19,9 +19,10 @@ from trimesh.visual import ColorVisuals
 from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
 from scene_viewport.mesh.gltf_extras import (
+    GltfDocument,
+    MapSampling,
     PrimitiveExtras,
-    TextureTransform,
-    read_primitive_extras,
+    SurfaceExtensions,
 )
 from scene_viewport.mesh.references import (
     FileStamp,
@@ -45,8 +46,12 @@ class ModelImportError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class ImportedMaterial:
-    """Flat material values read from a model file.
+class MaterialSurface:
+    """Everything a model file says about how a mesh's surface looks.
+
+    The first group is copied onto the :class:`MeshComponent` at import, so
+    the user can edit it and it is saved with the scene. The rest is read
+    from the file each time the material is built, like the texture maps.
 
     Args:
         color: Base color as ``#rrggbb``.
@@ -57,6 +62,11 @@ class ImportedMaterial:
         alpha_cutoff: Discard threshold for ``mask`` (glTF ``alphaCutoff``).
         double_sided: Draw back faces (glTF ``doubleSided``).
         unlit: ``KHR_materials_unlit``: show the color without lighting.
+        emissive: Linear RGB emissive factor. glTF's default is black,
+            which turns emission off.
+        extensions: ``KHR_materials_*`` factors (ior, clearcoat, specular,
+            sheen, iridescence, anisotropy, emissive strength).
+        vertex_colors: The mesh carries per-vertex colors (``COLOR_0``).
     """
 
     color: str
@@ -67,23 +77,54 @@ class ImportedMaterial:
     alpha_cutoff: float = 0.5
     double_sided: bool = False
     unlit: bool = False
+    emissive: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    extensions: SurfaceExtensions = dataclasses.field(default_factory=SurfaceExtensions)
+    vertex_colors: bool = False
+
+    #: Field names copied onto a ``MeshComponent`` at import.
+    COMPONENT_FIELDS = (
+        "color",
+        "roughness",
+        "metalness",
+        "opacity",
+        "alpha_mode",
+        "alpha_cutoff",
+        "double_sided",
+        "unlit",
+    )
+
+    def component_fields(self) -> dict[str, object]:
+        """Return the values to copy onto a ``MeshComponent``."""
+        return {name: getattr(self, name) for name in self.COMPONENT_FIELDS}
 
 
 @dataclass(frozen=True, slots=True)
 class ImportedMaps:
     """Texture images of one mesh, RGBA ``(height, width, 4)``, top row first.
 
+    Each image field is named after its :data:`MapKind`. Color maps are
+    sRGB; the rest hold linear data in the channels glTF assigns them.
+
     Args:
-        base_color: Color image (sRGB).
-        metallic_roughness: glTF packed map (linear): roughness in green,
-            metalness in blue.
-        normal: Tangent-space normal map (linear).
-        emissive: Emitted color image (sRGB).
-        occlusion: Ambient occlusion in the red channel (linear).
+        base_color: Color image.
+        metallic_roughness: Roughness in green, metalness in blue.
+        normal: Tangent-space normal map.
+        emissive: Emitted color image.
+        occlusion: Ambient occlusion in the red channel.
+        clearcoat: Clearcoat strength in red.
+        clearcoat_roughness: Clearcoat roughness in green.
+        clearcoat_normal: Clearcoat normal map.
+        specular: Specular strength in alpha.
+        specular_color: Specular color.
+        sheen_color: Sheen color.
+        sheen_roughness: Sheen roughness in alpha.
+        iridescence: Iridescence strength in red.
+        iridescence_thickness: Thin-film thickness in green.
+        anisotropy: Direction in red and green, strength in blue.
         emissive_factor: Linear RGB multiplier for ``emissive``. glTF's
             default is black, which turns emission off.
         occlusion_strength: How much ``occlusion`` darkens, 0 to 1.
-        transforms: ``KHR_texture_transform`` per map that has one.
+        sampling: UV set, wrap modes, and ``KHR_texture_transform`` per map.
     """
 
     base_color: NDArray[np.uint8] | None = None
@@ -91,11 +132,55 @@ class ImportedMaps:
     normal: NDArray[np.uint8] | None = None
     emissive: NDArray[np.uint8] | None = None
     occlusion: NDArray[np.uint8] | None = None
+    clearcoat: NDArray[np.uint8] | None = None
+    clearcoat_roughness: NDArray[np.uint8] | None = None
+    clearcoat_normal: NDArray[np.uint8] | None = None
+    specular: NDArray[np.uint8] | None = None
+    specular_color: NDArray[np.uint8] | None = None
+    sheen_color: NDArray[np.uint8] | None = None
+    sheen_roughness: NDArray[np.uint8] | None = None
+    iridescence: NDArray[np.uint8] | None = None
+    iridescence_thickness: NDArray[np.uint8] | None = None
+    anisotropy: NDArray[np.uint8] | None = None
     emissive_factor: tuple[float, float, float] = (0.0, 0.0, 0.0)
     occlusion_strength: float = 1.0
-    transforms: Mapping[MapKind, TextureTransform] = dataclasses.field(
-        default_factory=dict
-    )
+    sampling: Mapping[MapKind, MapSampling] = dataclasses.field(default_factory=dict)
+
+    def image(self, kind: MapKind) -> NDArray[np.uint8] | None:
+        """Return the image for ``kind``, or ``None``."""
+        return getattr(self, kind)
+
+    def has_images(self) -> bool:
+        """Whether any map carries an image."""
+        return any(self.image(kind) is not None for kind in _MAP_KINDS)
+
+
+#: Every map kind, in the order they appear in :class:`ImportedMaps`.
+_MAP_KINDS: tuple[MapKind, ...] = (
+    "base_color",
+    "metallic_roughness",
+    "normal",
+    "emissive",
+    "occlusion",
+    "clearcoat",
+    "clearcoat_roughness",
+    "clearcoat_normal",
+    "specular",
+    "specular_color",
+    "sheen_color",
+    "sheen_roughness",
+    "iridescence",
+    "iridescence_thickness",
+    "anisotropy",
+)
+#: Maps trimesh decodes itself; the rest are read through the glTF JSON.
+_TRIMESH_MAPS: tuple[MapKind, ...] = (
+    "base_color",
+    "metallic_roughness",
+    "normal",
+    "emissive",
+    "occlusion",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +208,7 @@ class ImportedModel:
         path: Resolved path of the file.
         nodes: Hierarchy, parents before children.
         meshes: Triangle buffers by mesh key.
-        materials: Material for each mesh key, or ``None`` when the file has
+        materials: Surface for each mesh key, or ``None`` when the file has
             none for it.
         maps: Texture images for each mesh key that has UVs and at least
             one image.
@@ -134,7 +219,7 @@ class ImportedModel:
     path: Path
     nodes: tuple[ImportedNode, ...]
     meshes: Mapping[str, MeshBuffers]
-    materials: Mapping[str, ImportedMaterial | None]
+    materials: Mapping[str, MaterialSurface | None]
     maps: Mapping[str, ImportedMaps]
     warnings: tuple[str, ...] = ()
 
@@ -228,19 +313,28 @@ def _parse(path: Path) -> ImportedModel:
         msg = f"cannot read {path.name}: not a scene"
         raise ModelImportError(msg)
 
-    extras = read_primitive_extras(path)
+    document = GltfDocument.open(path)
+    extras = document.primitive_extras() if document is not None else {}
     warnings: list[str] = []
     meshes: dict[str, MeshBuffers] = {}
-    materials: dict[str, ImportedMaterial | None] = {}
+    materials: dict[str, MaterialSurface | None] = {}
     maps: dict[str, ImportedMaps] = {}
     for key, geometry in scene.geometry.items():
         if not isinstance(geometry, trimesh.Trimesh) or len(geometry.faces) == 0:
             _log.info("skipping non-triangle geometry %r in %s", key, path.name)
             continue
-        buffers = _buffers(geometry)
         extra = extras.get(key, PrimitiveExtras())
-        materials[key] = _material(geometry, extra)
-        mesh_maps = _maps(geometry, extra, path.name, key, warnings)
+        buffers = _buffers(geometry, document, extra)
+        materials[key] = _material(geometry, extra, buffers.colors is not None)
+        mesh_maps = _maps(
+            geometry,
+            extra,
+            document,
+            file_name=path.name,
+            key=key,
+            has_uv1=buffers.texcoords1 is not None,
+            warnings=warnings,
+        )
         if mesh_maps is not None:
             maps[key] = mesh_maps
             if mesh_maps.normal is not None:
@@ -309,8 +403,17 @@ def _nodes(
     return nodes
 
 
-def _buffers(geometry: trimesh.Trimesh) -> MeshBuffers:
-    """Convert a trimesh mesh into contiguous float32 / uint32 buffers."""
+def _buffers(
+    geometry: trimesh.Trimesh,
+    document: GltfDocument | None = None,
+    extra: PrimitiveExtras | None = None,
+) -> MeshBuffers:
+    """Convert a trimesh mesh into contiguous float32 / uint32 buffers.
+
+    A second UV set and vertex colors come from the glTF accessors trimesh
+    skips, when ``document`` is given; PLY/OBJ vertex colors come from
+    trimesh's color visuals.
+    """
     positions = np.ascontiguousarray(geometry.vertices, dtype=np.float32)
     faces = np.ascontiguousarray(geometry.faces, dtype=np.uint32)
     # trimesh caches normals it read from the file. Without SciPy its own
@@ -326,12 +429,42 @@ def _buffers(geometry: trimesh.Trimesh) -> MeshBuffers:
         texcoords = np.ascontiguousarray(np.asarray(uv)[:, :2], dtype=np.float32)
     else:
         texcoords = np.zeros((len(positions), 2), dtype=np.float32)
+    texcoords1: NDArray[np.float32] | None = None
+    colors: NDArray[np.float32] | None = None
+    if document is not None and extra is not None:
+        if extra.texcoords1 is not None:
+            texcoords1 = _attribute(document, extra.texcoords1, len(positions), 2)
+        if extra.colors is not None:
+            colors = _attribute(document, extra.colors, len(positions), (3, 4))
+    visual = geometry.visual
+    if colors is None and isinstance(visual, ColorVisuals) and visual.kind == "vertex":
+        colors = np.asarray(visual.vertex_colors, dtype=np.float32) / 255.0
+    if colors is not None and colors.shape[1] == 3:
+        colors = np.hstack([colors, np.ones((len(colors), 1), dtype=np.float32)])
     return MeshBuffers(
         positions=positions,
         normals=normals,
         indices=faces,
         texcoords=texcoords,
+        texcoords1=texcoords1,
+        colors=None if colors is None else np.ascontiguousarray(colors),
     )
+
+
+def _attribute(
+    document: GltfDocument,
+    accessor: int,
+    count: int,
+    components: int | tuple[int, ...],
+) -> NDArray[np.float32] | None:
+    """Decode a vertex attribute that must match the mesh's vertex count."""
+    values = document.accessor_array(accessor)
+    if values is None or len(values) != count:
+        return None
+    allowed = (components,) if isinstance(components, int) else components
+    if values.shape[1] not in allowed:
+        return None
+    return values
 
 
 def vertex_normals(
@@ -375,64 +508,61 @@ def vertex_normals(
 def _maps(
     geometry: trimesh.Trimesh,
     extra: PrimitiveExtras,
+    document: GltfDocument | None,
+    *,
     file_name: str,
     key: str,
+    has_uv1: bool,
     warnings: list[str],
 ) -> ImportedMaps | None:
     """Read a mesh's texture images, when it has UVs and any image.
 
-    Maps that sample a second UV set are dropped with a warning: trimesh
-    only reads ``TEXCOORD_0``.
+    Core maps come from trimesh; ``KHR_materials_*`` textures are decoded
+    through ``document``. A map that samples a UV set the mesh doesn't
+    carry is dropped with a warning.
     """
     visual = geometry.visual
     uv = getattr(visual, "uv", None)
     if uv is None or len(uv) != len(geometry.vertices):
         return None
     material = getattr(visual, "material", None)
-    if isinstance(material, PBRMaterial):
-        factor = material.emissiveFactor
-        images: dict[MapKind, NDArray[np.uint8] | None] = {
-            "base_color": _rgba(material.baseColorTexture),
-            "metallic_roughness": _rgba(material.metallicRoughnessTexture),
-            "normal": _rgba(material.normalTexture),
-            "emissive": _rgba(material.emissiveTexture),
-            "occlusion": _rgba(material.occlusionTexture),
-        }
-        for kind, channel in extra.uv_channels.items():
-            if images.get(kind) is not None:
-                images[kind] = None
-                warnings.append(
-                    f"{file_name}: {key} {kind.replace('_', ' ')} map uses UV set "
-                    f"{channel}, which is not supported; shown without it"
-                )
-        maps = ImportedMaps(
-            base_color=images["base_color"],
-            metallic_roughness=images["metallic_roughness"],
-            normal=images["normal"],
-            emissive=images["emissive"],
-            occlusion=images["occlusion"],
-            emissive_factor=_rgb(factor) if factor is not None else (0.0, 0.0, 0.0),
-            occlusion_strength=extra.occlusion_strength,
-            transforms={
-                kind: transform
-                for kind, transform in extra.transforms.items()
-                if images.get(kind) is not None
-            },
-        )
-    elif isinstance(material, SimpleMaterial):
+    if isinstance(material, SimpleMaterial):
         maps = ImportedMaps(base_color=_rgba(material.image))
-    else:
+        return maps if maps.has_images() else None
+    if not isinstance(material, PBRMaterial):
         return None
-    present = (
-        maps.base_color,
-        maps.metallic_roughness,
-        maps.normal,
-        maps.emissive,
-        maps.occlusion,
+    images: dict[MapKind, NDArray[np.uint8] | None] = {
+        "base_color": _rgba(material.baseColorTexture),
+        "metallic_roughness": _rgba(material.metallicRoughnessTexture),
+        "normal": _rgba(material.normalTexture),
+        "emissive": _rgba(material.emissiveTexture),
+        "occlusion": _rgba(material.occlusionTexture),
+    }
+    if document is not None:
+        for kind, sampling in extra.maps.items():
+            if kind not in _TRIMESH_MAPS and sampling.texture >= 0:
+                images[kind] = document.image_rgba(sampling.texture)
+    sampling_by_kind: dict[MapKind, MapSampling] = {}
+    for kind, sampling in extra.maps.items():
+        if images.get(kind) is None:
+            continue
+        if sampling.uv_channel > 1 or (sampling.uv_channel == 1 and not has_uv1):
+            images[kind] = None
+            warnings.append(
+                f"{file_name}: {key} {kind.replace('_', ' ')} map uses UV set "
+                f"{sampling.uv_channel}, which this mesh doesn't carry; shown "
+                "without it"
+            )
+            continue
+        sampling_by_kind[kind] = sampling
+    factor = material.emissiveFactor
+    maps = ImportedMaps(
+        **images,
+        emissive_factor=_rgb(factor) if factor is not None else (0.0, 0.0, 0.0),
+        occlusion_strength=extra.occlusion_strength,
+        sampling=sampling_by_kind,
     )
-    if all(image is None for image in present):
-        return None
-    return maps
+    return maps if maps.has_images() else None
 
 
 def _rgba(image: object) -> NDArray[np.uint8] | None:
@@ -513,14 +643,14 @@ def vertex_tangents(
 
 
 def _material(
-    geometry: trimesh.Trimesh, extra: PrimitiveExtras
-) -> ImportedMaterial | None:
-    """Read base color, roughness, metalness, alpha, and sides from the file."""
+    geometry: trimesh.Trimesh, extra: PrimitiveExtras, has_colors: bool
+) -> MaterialSurface | None:
+    """Read the surface the file describes: the one reader for every format."""
     visual = geometry.visual
     material = getattr(visual, "material", None)
     if isinstance(material, PBRMaterial):
         factor = material.baseColorFactor
-        return ImportedMaterial(
+        return MaterialSurface(
             # glTF's default factor is white, which leaves a texture as is.
             color=_hex(factor) if factor is not None else "#ffffff",
             roughness=_unit(material.roughnessFactor, 1.0),
@@ -530,19 +660,28 @@ def _material(
             alpha_cutoff=_unit(material.alphaCutoff, 0.5),
             double_sided=bool(material.doubleSided),
             unlit=extra.unlit,
+            emissive=(
+                _rgb(material.emissiveFactor)
+                if material.emissiveFactor is not None
+                else (0.0, 0.0, 0.0)
+            ),
+            extensions=extra.extensions,
+            vertex_colors=has_colors,
         )
     if isinstance(material, SimpleMaterial):
-        return ImportedMaterial(
+        return MaterialSurface(
             color=_hex(material.diffuse),
             roughness=0.6,
             metalness=0.0,
+            vertex_colors=has_colors,
         )
-    # Vertex or face colors (common in PLY): use the dominant one.
+    # Vertex or face colors (common in PLY): the dominant one is the base.
     if isinstance(visual, ColorVisuals) and visual.defined:
-        return ImportedMaterial(
+        return MaterialSurface(
             color=_hex(visual.main_color),
             roughness=0.6,
             metalness=0.0,
+            vertex_colors=has_colors,
         )
     return None
 

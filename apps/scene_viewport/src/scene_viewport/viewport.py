@@ -6,7 +6,7 @@ import logging
 import weakref
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal
 
 import numpy as np
 import pygfx as gfx
@@ -34,8 +34,13 @@ from scene_viewport.gizmo import (
     InteractionTool,
     MayaTransformGizmo,
 )
+from scene_viewport.materials import COLOR_MAPS, build_material, surface_kwargs
 from scene_viewport.mesh.geometry import file_geometry, geometry_for
-from scene_viewport.mesh.importer import ImportedMaps, ModelImportError
+from scene_viewport.mesh.importer import (
+    ImportedMaps,
+    MaterialSurface,
+    ModelImportError,
+)
 from scene_viewport.mesh.references import (
     FileStamp,
     file_stamp,
@@ -44,7 +49,11 @@ from scene_viewport.mesh.references import (
 from scene_viewport.mesh.types import MapKind
 from scene_viewport.navigation import navigation_controls
 from scene_viewport.settings import AppSettings, renderer_gamma
-from scene_viewport.textures import file_maps, load_albedo_texture, texture_from_rgba
+from scene_viewport.textures import (
+    file_material,
+    load_albedo_texture,
+    texture_from_rgba,
+)
 from scene_viewport.xform_math import (
     as_vec3,
     average_positions,
@@ -109,19 +118,6 @@ DrawMode = Literal[
     "textured",
 ]
 _LIT_DRAW_MODES = frozenset({"shaded", "textured", "wire_shaded"})
-#: Maps holding colors (sRGB); the others hold linear data.
-_COLOR_MAPS = frozenset({"base_color", "emissive"})
-
-
-class _SurfaceKwargs(TypedDict):
-    """Constructor arguments shared by lit and unlit mesh materials."""
-
-    side: str
-    opacity: float
-    alpha_mode: str
-    alpha_test: float
-
-
 ViewPreset = Literal["perspective", "top", "front", "side"]
 # Look direction per preset. Top tilts a hair off vertical so the orbit
 # controller's +Y reference up never becomes degenerate.
@@ -392,15 +388,17 @@ class ViewportController:
         for outline in self._outlines.values():
             _material_of(outline, gfx.MeshBasicMaterial).wireframe_thickness = thickness
 
-    def _file_maps(self, component: MeshComponent) -> ImportedMaps | None:
-        """Return the images of a ``file`` mesh, reading its model file once.
+    def _file_material(
+        self, component: MeshComponent
+    ) -> tuple[MaterialSurface | None, ImportedMaps | None]:
+        """Return a ``file`` mesh's surface and images, reading the file once.
 
         Called once per material build, so the file is stamped once rather
         than once per map.
         """
         if component.kind != "file":
-            return None
-        return file_maps(component.source, component.source_mesh)
+            return None, None
+        return file_material(component.source, component.source_mesh)
 
     def _albedo_texture(
         self,
@@ -431,9 +429,9 @@ class ViewportController:
             return None
         key = f"{component.source}#{component.source_mesh}#{kind}"
         if key not in self._albedo_cache:
-            pixels = getattr(maps, kind) if maps is not None else None
+            pixels = maps.image(kind) if maps is not None else None
             self._albedo_cache[key] = (
-                texture_from_rgba(pixels, color=kind in _COLOR_MAPS)
+                texture_from_rgba(pixels, color=kind in COLOR_MAPS)
                 if pixels is not None
                 else None
             )
@@ -445,98 +443,22 @@ class ViewportController:
         *,
         textured: bool = False,
     ) -> gfx.MeshStandardMaterial | gfx.MeshBasicMaterial:
-        """Build the lit (or unlit) material for shaded and textured modes."""
-        material: gfx.MeshStandardMaterial | gfx.MeshBasicMaterial
-        surface = self._surface_kwargs(component)
-        if component.unlit:
-            material = gfx.MeshBasicMaterial(
-                color=component.color, pick_write=True, **surface
-            )
-        else:
-            material = gfx.MeshStandardMaterial(
-                color=component.color,
-                roughness=component.roughness,
-                metalness=component.metalness,
-                env_map=self._env_map,
-                env_map_intensity=self._effective_env_intensity(),
-                pick_write=True,
-                **surface,
-            )
-        if textured:
-            maps = self._file_maps(component)
-            texture = self._albedo_texture(component, maps)
-            if texture is not None:
-                material.map = self._texture_map(texture, "base_color", maps)
-            if isinstance(material, gfx.MeshStandardMaterial):
-                self._apply_file_maps(material, component, maps)
-        return material
+        """Build the lit (or unlit) material for shaded and textured modes.
 
-    @staticmethod
-    def _surface_kwargs(component: MeshComponent) -> _SurfaceKwargs:
-        """Material constructor arguments for sides, opacity, and alpha.
-
-        ``opaque`` ignores alpha, ``mask`` discards fragments below the
-        cutoff, and ``blend`` composites with the over operator. Passed at
-        construction because pygfx types the ``alpha_mode`` setter with its
-        own enum class.
+        The file is read once; :func:`scene_viewport.materials.build_material`
+        turns the component, the file's surface, and its maps into pygfx.
         """
-        kwargs: _SurfaceKwargs = {
-            "side": "both" if component.double_sided else "front",
-            "opacity": component.opacity,
-            "alpha_mode": "solid",
-            "alpha_test": 0.0,
-        }
-        if component.alpha_mode == "blend":
-            kwargs["alpha_mode"] = "blend"
-        elif component.alpha_mode == "mask":
-            kwargs["alpha_test"] = max(component.alpha_cutoff, 1e-6)
-        return kwargs
-
-    @staticmethod
-    def _texture_map(
-        texture: gfx.Texture,
-        kind: MapKind,
-        maps: ImportedMaps | None,
-    ) -> gfx.TextureMap:
-        """Wrap ``texture``, applying the file's ``KHR_texture_transform``."""
-        texture_map = gfx.TextureMap(texture)
-        transform = maps.transforms.get(kind) if maps is not None else None
-        if transform is not None:
-            texture_map.offset = transform.offset
-            texture_map.rotation = transform.rotation
-            texture_map.scale = transform.scale
-            texture_map.update_matrix()
-        return texture_map
-
-    def _apply_file_maps(
-        self,
-        material: gfx.MeshStandardMaterial,
-        component: MeshComponent,
-        maps: ImportedMaps | None,
-    ) -> None:
-        """Add an imported mesh's roughness/metal, normal, emissive, and AO maps."""
-        packed = self._file_texture(component, "metallic_roughness", maps)
-        if packed is not None:
-            # glTF packs roughness in green and metalness in blue, the
-            # channels pygfx samples for each map.
-            material.roughness_map = self._texture_map(
-                packed, "metallic_roughness", maps
-            )
-            material.metalness_map = self._texture_map(
-                packed, "metallic_roughness", maps
-            )
-        normal = self._file_texture(component, "normal", maps)
-        if normal is not None:
-            material.normal_map = self._texture_map(normal, "normal", maps)
-        emissive = self._file_texture(component, "emissive", maps)
-        if emissive is not None and maps is not None and any(maps.emissive_factor):
-            material.emissive_map = self._texture_map(emissive, "emissive", maps)
-            # glTF factors are linear; pygfx colors are sRGB.
-            material.emissive = gfx.Color.from_physical(*maps.emissive_factor)
-        occlusion = self._file_texture(component, "occlusion", maps)
-        if occlusion is not None and maps is not None:
-            material.ao_map = self._texture_map(occlusion, "occlusion", maps)
-            material.ao_map_intensity = maps.occlusion_strength
+        surface, maps = self._file_material(component)
+        return build_material(
+            component,
+            surface=surface,
+            maps=maps,
+            albedo=self._albedo_texture(component, maps) if textured else None,
+            texture_for=lambda kind: self._file_texture(component, kind, maps),
+            textured=textured,
+            env_map=self._env_map,
+            env_map_intensity=self._effective_env_intensity(),
+        )
 
     @property
     def draw_mode(self) -> DrawMode:
@@ -580,7 +502,7 @@ class ViewportController:
             color=component.color,
             wireframe_thickness=thickness,  # pyright: ignore[reportArgumentType]
             pick_write=True,
-            **self._surface_kwargs(component),
+            **surface_kwargs(component),
         )
 
     def _apply_draw_mode_to_mesh(self, name: str) -> None:
