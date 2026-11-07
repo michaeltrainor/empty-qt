@@ -145,3 +145,24 @@ def test_selection_after_click_maya_modifiers(
 
     result = selection_after_click(["a", "b"], name, shift=shift, ctrl=ctrl)
     assert result == expected
+
+
+@pytest.mark.parametrize("fov", [0.0, 50.0])
+def test_framing_keeps_the_target_between_the_clip_planes(fov: float) -> None:
+    """Orthographic framing used to clip a flat object at the camera plane."""
+    from types import SimpleNamespace
+
+    from scene_viewport.viewport import ViewportController
+
+    camera = gfx.PerspectiveCamera(fov, 1.0)
+    host = SimpleNamespace(
+        camera=camera, _canvas=SimpleNamespace(request_draw=lambda: None)
+    )
+    center = np.array([1.25, 0.0, 0.0])
+    ViewportController._show_sphere(host, (*center, 1.5), (0.0, 0.0, -1.0))  # type: ignore[arg-type]
+    forward = np.asarray(camera.world.forward)
+    depth = float((center - np.asarray(camera.world.position)) @ forward)
+    near, far = camera.depth_range
+    # The whole sphere lies inside the depth range.
+    assert near < depth - 1.5
+    assert depth + 1.5 < far

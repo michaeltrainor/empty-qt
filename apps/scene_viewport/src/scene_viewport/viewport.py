@@ -38,7 +38,7 @@ from scene_viewport.mesh.geometry import file_geometry, geometry_for
 from scene_viewport.mesh.importer import ModelImportError
 from scene_viewport.navigation import navigation_controls
 from scene_viewport.settings import AppSettings, renderer_gamma
-from scene_viewport.textures import load_albedo_texture
+from scene_viewport.textures import file_texture, load_albedo_texture
 from scene_viewport.xform_math import (
     as_vec3,
     average_positions,
@@ -370,12 +370,23 @@ class ViewportController:
             _material_of(outline, gfx.MeshBasicMaterial).wireframe_thickness = thickness
 
     def _albedo_texture(self, component: MeshComponent) -> gfx.Texture | None:
-        """Return a cached albedo texture for ``component``, if any."""
+        """Return a cached albedo texture for ``component``, if any.
+
+        ``albedo_map`` wins; an imported mesh without one uses its file's
+        base color texture.
+        """
         key = str(component.albedo_map).strip()
-        if not key:
+        if key and key != ".":
+            if key not in self._albedo_cache:
+                self._albedo_cache[key] = load_albedo_texture(component.albedo_map)
+            return self._albedo_cache[key]
+        if component.kind != "file":
             return None
+        key = f"{component.source}#{component.source_mesh}"
         if key not in self._albedo_cache:
-            self._albedo_cache[key] = load_albedo_texture(component.albedo_map)
+            self._albedo_cache[key] = file_texture(
+                component.source, component.source_mesh
+            )
         return self._albedo_cache[key]
 
     def _mesh_material(
@@ -789,8 +800,14 @@ class ViewportController:
         self.camera.show_object(sphere, view_dir, scale=1.35)  # pyright: ignore[reportArgumentType]
         size = sphere[3] * 2.0
         near = max(0.05, size * 0.02)
-        far = max(near * 200.0, size * 40.0, 50.0)
-        self.camera.depth_range = (near, min(far, 5000.0))
+        far = min(max(near * 200.0, size * 40.0, 50.0), 5000.0)
+        if self.camera.fov == 0:
+            # pygfx parks an orthographic camera at the sphere's centre, so
+            # it must see behind itself too (as pygfx's own default range
+            # does). A positive near plane would clip the framed objects.
+            self.camera.depth_range = (-far, far)
+        else:
+            self.camera.depth_range = (near, far)
         self._canvas.request_draw()
 
     def frame_selection(self, names: Sequence[str] | None = None) -> None:

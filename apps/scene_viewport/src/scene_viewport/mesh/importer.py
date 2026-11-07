@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from numpy.typing import NDArray
+from PIL import Image
 from trimesh.visual import ColorVisuals
 from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
@@ -72,12 +73,16 @@ class ImportedModel:
         meshes: Triangle buffers by mesh key.
         materials: Material for each mesh key, or ``None`` when the file has
             none for it.
+        textures: Base color image for each textured mesh key, RGBA
+            ``(height, width, 4)`` with the top row first. Meshes without
+            UVs or an image have no entry.
     """
 
     path: Path
     nodes: tuple[ImportedNode, ...]
     meshes: Mapping[str, MeshBuffers]
     materials: Mapping[str, ImportedMaterial | None]
+    textures: Mapping[str, NDArray[np.uint8]]
 
 
 def is_importable(path: Path) -> bool:
@@ -163,12 +168,16 @@ def _parse(path: Path) -> ImportedModel:
 
     meshes: dict[str, MeshBuffers] = {}
     materials: dict[str, ImportedMaterial | None] = {}
+    textures: dict[str, NDArray[np.uint8]] = {}
     for key, geometry in scene.geometry.items():
         if not isinstance(geometry, trimesh.Trimesh) or len(geometry.faces) == 0:
             _log.info("skipping non-triangle geometry %r in %s", key, path.name)
             continue
         meshes[key] = _buffers(geometry)
         materials[key] = _material(geometry)
+        texture = _texture(geometry)
+        if texture is not None:
+            textures[key] = texture
     if not meshes:
         msg = f"{path.name} has no triangle meshes"
         raise ModelImportError(msg)
@@ -178,6 +187,7 @@ def _parse(path: Path) -> ImportedModel:
         nodes=tuple(_nodes(scene, meshes)),
         meshes=meshes,
         materials=materials,
+        textures=textures,
     )
 
 
@@ -222,7 +232,8 @@ def _buffers(geometry: trimesh.Trimesh) -> MeshBuffers:
     # trimesh caches normals it read from the file. Without SciPy its own
     # fallback for computing them takes minutes on a large mesh, so compute
     # missing ones here.
-    if "vertex_normals" in geometry._cache:
+    # trimesh 5 keeps them in its private cache; tolerate it going away.
+    if "vertex_normals" in getattr(geometry, "_cache", {}):
         normals = np.ascontiguousarray(geometry.vertex_normals, dtype=np.float32)
     else:
         normals = vertex_normals(positions, faces)
@@ -277,6 +288,24 @@ def vertex_normals(
     return np.ascontiguousarray(summed / length[:, None], dtype=np.float32)
 
 
+def _texture(geometry: trimesh.Trimesh) -> NDArray[np.uint8] | None:
+    """Return the base color image as RGBA, when the mesh has one and UVs."""
+    visual = geometry.visual
+    uv = getattr(visual, "uv", None)
+    if uv is None or len(uv) != len(geometry.vertices):
+        return None
+    material = getattr(visual, "material", None)
+    if isinstance(material, PBRMaterial):
+        image = material.baseColorTexture
+    elif isinstance(material, SimpleMaterial):
+        image = material.image
+    else:
+        return None
+    if not isinstance(image, Image.Image):
+        return None
+    return np.array(image.convert("RGBA"), dtype=np.uint8)
+
+
 def _material(geometry: trimesh.Trimesh) -> ImportedMaterial | None:
     """Read base color, roughness, and metalness, when the file sets them."""
     visual = geometry.visual
@@ -284,7 +313,8 @@ def _material(geometry: trimesh.Trimesh) -> ImportedMaterial | None:
     if isinstance(material, PBRMaterial):
         factor = material.baseColorFactor
         return ImportedMaterial(
-            color=_hex(factor) if factor is not None else "#cccccc",
+            # glTF's default factor is white, which leaves a texture as is.
+            color=_hex(factor) if factor is not None else "#ffffff",
             roughness=_unit(material.roughnessFactor, 1.0),
             metalness=_unit(material.metallicFactor, 1.0),
         )
