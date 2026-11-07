@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Scene viewport import fixes from the PR #28 review:
+  - A texture added to an edited `.mtl` is now tracked, warned about, and
+    reloaded without touching the `.obj`; each material library is scanned
+    on its own timestamp.
+  - OBJ `mtllib` lines with several libraries, and `mtllib` / `map_*` file
+    names with spaces (after options such as `-bm 1` or `-o 0 0.5`), are
+    read correctly.
+  - glTF buffers and images behind `http:` / `https:` URIs are reported as
+    "remote file not loaded" instead of as missing files.
+  - A textured material build reads its model file once instead of once
+    per map, so large scenes stat fewer files.
 - `SceneGraphTree` reparents and reorders by drag and drop when
   `drag_drop=True` (or `set_drag_drop_enabled`). Drop on a row to append
   under it, or between rows to reorder; `nodesMoved` reports the move, and

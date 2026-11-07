@@ -5,8 +5,9 @@ from __future__ import annotations
 import functools
 import json
 import struct
+from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from PIL import Image
 
@@ -14,8 +15,23 @@ from PIL import Image
 _IMAGE_SUFFIXES = frozenset(
     {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 )
-#: OBJ material statements whose last token is a file.
+#: OBJ material statements whose argument is a file.
 _MTL_MAPS = frozenset({"bump", "disp", "decal", "norm", "refl"})
+#: MTL map options and how many values each takes. ``-o``, ``-s``, and ``-t``
+#: take one to three numbers, so they are handled by reading numbers.
+_MTL_OPTION_ARITY = {
+    "-blendu": 1,
+    "-blendv": 1,
+    "-boost": 1,
+    "-mm": 2,
+    "-texres": 1,
+    "-clamp": 1,
+    "-bm": 1,
+    "-imfchan": 1,
+    "-type": 1,
+    "-cc": 1,
+}
+_MTL_VECTOR_OPTIONS = frozenset({"-o", "-s", "-t"})
 _GLB_MAGIC = b"glTF"
 _GLB_JSON_CHUNK = 0x4E4F534A
 
@@ -23,12 +39,23 @@ _GLB_JSON_CHUNK = 0x4E4F534A
 FileStamp = tuple[str, int, int]
 
 
+@dataclass(frozen=True, slots=True)
+class _Scan:
+    """What one pass over a model file found."""
+
+    files: tuple[Path, ...]
+    remote: tuple[str, ...]
+
+
 def referenced_files(path: Path) -> tuple[Path, ...]:
     """Return the external files ``path`` refers to.
 
     glTF (``.gltf`` and ``.glb``) buffer and image URIs and OBJ material
-    libraries with their texture maps are listed. Embedded data and other
-    formats have none.
+    libraries with their texture maps are listed. Embedded data, remote
+    URIs (see :func:`remote_references`), and other formats have none.
+
+    Each material library is scanned on its own timestamp, so a texture
+    added to an edited ``.mtl`` shows up without touching the ``.obj``.
 
     Args:
         path: Model file.
@@ -37,11 +64,29 @@ def referenced_files(path: Path) -> tuple[Path, ...]:
         Referenced paths, in file order and without duplicates. They may not
         exist.
     """
-    try:
-        stat = path.stat()
-    except OSError:
+    scan = _scan_file(path)
+    if scan is None:
         return ()
-    return _referenced(path.resolve(), stat.st_mtime_ns, stat.st_size)
+    files = list(scan.files)
+    for file in scan.files:
+        if file.suffix.lower() == ".mtl":
+            files.extend(_scan_library(file))
+    return tuple(dict.fromkeys(files))
+
+
+def remote_references(path: Path) -> tuple[str, ...]:
+    """Return glTF buffer and image URIs with a scheme, such as ``https:``.
+
+    These are not fetched, so a texture behind one is never shown.
+
+    Args:
+        path: Model file.
+
+    Returns:
+        The URIs in file order, without duplicates.
+    """
+    scan = _scan_file(path)
+    return () if scan is None else scan.remote
 
 
 def source_signature(path: Path) -> tuple[FileStamp, ...]:
@@ -57,7 +102,7 @@ def source_signature(path: Path) -> tuple[FileStamp, ...]:
 
 
 def reference_problems(path: Path) -> list[str]:
-    """Describe referenced files that are missing or unreadable images.
+    """Describe referenced files that are missing, unreadable, or remote.
 
     Args:
         path: Model file.
@@ -78,6 +123,8 @@ def reference_problems(path: Path) -> list[str]:
         except Exception:
             # Pillow raises many types for truncated or foreign data.
             problems.append(f"{path.name}: cannot read image {file.name}")
+    for uri in remote_references(path):
+        problems.append(f"{path.name}: remote file not loaded {uri}")
     return problems
 
 
@@ -97,38 +144,70 @@ def file_stamp(file: Path) -> FileStamp:
     return (str(file), stat.st_mtime_ns, stat.st_size)
 
 
+def _scan_file(path: Path) -> _Scan | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _scan(path.resolve(), stat.st_mtime_ns, stat.st_size)
+
+
+def _scan_library(library: Path) -> tuple[Path, ...]:
+    try:
+        stat = library.stat()
+    except OSError:
+        return ()
+    return _mtl_scan(library, stat.st_mtime_ns, stat.st_size)
+
+
 @functools.lru_cache(maxsize=64)
-def _referenced(path: Path, _mtime_ns: int, _size: int) -> tuple[Path, ...]:
+def _scan(path: Path, _mtime_ns: int, _size: int) -> _Scan:
     """Scan ``path`` once per version; the stat values only key the cache."""
     suffix = path.suffix.lower()
     try:
         if suffix == ".gltf":
-            files = _gltf_files(path, json.loads(path.read_text(encoding="utf-8")))
-        elif suffix == ".glb":
-            files = _gltf_files(path, _glb_json(path))
-        elif suffix == ".obj":
-            files = _obj_files(path)
-        else:
-            files = []
+            return _gltf_scan(path, json.loads(path.read_text(encoding="utf-8")))
+        if suffix == ".glb":
+            return _gltf_scan(path, _glb_json(path))
+        if suffix == ".obj":
+            return _Scan(files=tuple(dict.fromkeys(_obj_libraries(path))), remote=())
     except (OSError, ValueError):
         # Unreadable or malformed: loading reports the real error.
+        pass
+    return _Scan(files=(), remote=())
+
+
+@functools.lru_cache(maxsize=64)
+def _mtl_scan(library: Path, _mtime_ns: int, _size: int) -> tuple[Path, ...]:
+    """Scan one material library per version; the stat values key the cache."""
+    try:
+        return tuple(dict.fromkeys(_mtl_files(library)))
+    except OSError:
         return ()
-    return tuple(dict.fromkeys(files))
 
 
-def _gltf_files(path: Path, document: object) -> list[Path]:
+def _gltf_scan(path: Path, document: object) -> _Scan:
     if not isinstance(document, dict):
-        return []
+        return _Scan(files=(), remote=())
     files: list[Path] = []
+    remote: list[str] = []
     for section in ("buffers", "images"):
         entries = document.get(section)
         if not isinstance(entries, list):
             continue
         for entry in entries:
             uri = entry.get("uri") if isinstance(entry, dict) else None
-            if isinstance(uri, str) and uri and not uri.startswith("data:"):
-                files.append(path.parent / unquote(uri))
-    return files
+            if not isinstance(uri, str) or not uri:
+                continue
+            scheme = urlsplit(uri).scheme.lower()
+            if scheme == "data":
+                continue
+            if len(scheme) > 1:
+                # A one-letter scheme is a Windows drive, not a URL.
+                remote.append(uri)
+                continue
+            files.append(path.parent / unquote(uri))
+    return _Scan(files=tuple(dict.fromkeys(files)), remote=tuple(dict.fromkeys(remote)))
 
 
 def _glb_json(path: Path) -> object:
@@ -145,17 +224,25 @@ def _glb_json(path: Path) -> object:
         return json.loads(stream.read(length).decode("utf-8"))
 
 
-def _obj_files(path: Path) -> list[Path]:
+def _obj_libraries(path: Path) -> list[Path]:
+    """Return the material libraries an OBJ names on its ``mtllib`` lines.
+
+    The OBJ format allows several libraries on one line, separated by
+    spaces, but file names may contain spaces too. The whole remainder of
+    the line wins when a file by that name exists; otherwise each word is a
+    library.
+    """
     files: list[Path] = []
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
-            if line.startswith("mtllib"):
-                name = line[len("mtllib") :].strip()
-                if name:
-                    files.append(path.parent / name)
-    for library in list(files):
-        if library.is_file():
-            files.extend(_mtl_files(library))
+            words = line.split()
+            if len(words) < 2 or words[0] != "mtllib":
+                continue
+            whole = path.parent / line.split(None, 1)[1].strip()
+            if whole.is_file() or len(words) == 2:
+                files.append(whole)
+            else:
+                files.extend(path.parent / word for word in words[1:])
     return files
 
 
@@ -168,6 +255,33 @@ def _mtl_files(library: Path) -> list[Path]:
                 continue
             statement = words[0].lower()
             if statement.startswith("map_") or statement in _MTL_MAPS:
-                # Options such as ``-bm 1`` come first; the file is last.
-                files.append(library.parent / words[-1])
+                name = _mtl_map_file(words[1:])
+                if name:
+                    files.append(library.parent / name)
     return files
+
+
+def _mtl_map_file(words: list[str]) -> str:
+    """Return the file name of a map statement, after its ``-option`` values.
+
+    Options come first (``-bm 1``, ``-o 0 0.5``); whatever is left is the
+    file name, joined with single spaces so names with spaces survive.
+    """
+    index = 0
+    while index < len(words) and words[index].startswith("-"):
+        option = words[index].lower()
+        index += 1
+        if option in _MTL_VECTOR_OPTIONS:
+            while index < len(words) and _is_number(words[index]):
+                index += 1
+        else:
+            index += _MTL_OPTION_ARITY.get(option, 1)
+    return " ".join(words[index:])
+
+
+def _is_number(word: str) -> bool:
+    try:
+        float(word)
+    except ValueError:
+        return False
+    return True
