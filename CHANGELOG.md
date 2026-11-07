@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Scene viewport: an OBJ material library named without a `.mtl` suffix is
+  scanned for textures too, and MTL map statements with an unknown
+  `-option` or a file name starting with `-` resolve to the right file.
 - Scene viewport import fixes from the PR #28 review:
   - A texture added to an edited `.mtl` is now tracked, warned about, and
     reloaded without touching the `.obj`; each material library is scanned

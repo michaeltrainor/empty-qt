@@ -41,10 +41,15 @@ FileStamp = tuple[str, int, int]
 
 @dataclass(frozen=True, slots=True)
 class _Scan:
-    """What one pass over a model file found."""
+    """What one pass over a model file found.
+
+    ``libraries`` are the OBJ material libraries among ``files``; each is
+    scanned for texture maps on its own timestamp.
+    """
 
     files: tuple[Path, ...]
-    remote: tuple[str, ...]
+    remote: tuple[str, ...] = ()
+    libraries: tuple[Path, ...] = ()
 
 
 def referenced_files(path: Path) -> tuple[Path, ...]:
@@ -68,9 +73,8 @@ def referenced_files(path: Path) -> tuple[Path, ...]:
     if scan is None:
         return ()
     files = list(scan.files)
-    for file in scan.files:
-        if file.suffix.lower() == ".mtl":
-            files.extend(_scan_library(file))
+    for library in scan.libraries:
+        files.extend(_scan_library(library))
     return tuple(dict.fromkeys(files))
 
 
@@ -170,11 +174,12 @@ def _scan(path: Path, _mtime_ns: int, _size: int) -> _Scan:
         if suffix == ".glb":
             return _gltf_scan(path, _glb_json(path))
         if suffix == ".obj":
-            return _Scan(files=tuple(dict.fromkeys(_obj_libraries(path))), remote=())
+            libraries = tuple(dict.fromkeys(_obj_libraries(path)))
+            return _Scan(files=libraries, libraries=libraries)
     except (OSError, ValueError):
         # Unreadable or malformed: loading reports the real error.
         pass
-    return _Scan(files=(), remote=())
+    return _Scan(files=())
 
 
 @functools.lru_cache(maxsize=64)
@@ -188,7 +193,7 @@ def _mtl_scan(library: Path, _mtime_ns: int, _size: int) -> tuple[Path, ...]:
 
 def _gltf_scan(path: Path, document: object) -> _Scan:
     if not isinstance(document, dict):
-        return _Scan(files=(), remote=())
+        return _Scan(files=())
     files: list[Path] = []
     remote: list[str] = []
     for section in ("buffers", "images"):
@@ -265,18 +270,32 @@ def _mtl_map_file(words: list[str]) -> str:
     """Return the file name of a map statement, after its ``-option`` values.
 
     Options come first (``-bm 1``, ``-o 0 0.5``); whatever is left is the
-    file name, joined with single spaces so names with spaces survive.
+    file name, joined with single spaces so names with spaces survive. A
+    ``-word`` with a dot in it is taken as the start of the file name, since
+    options never contain one. An unknown option takes only the numbers or
+    ``on`` / ``off`` words that follow it.
     """
     index = 0
     while index < len(words) and words[index].startswith("-"):
         option = words[index].lower()
+        if option not in _MTL_OPTION_ARITY and option not in _MTL_VECTOR_OPTIONS:
+            if "." in option:
+                break  # A file name such as ``-shadow.png``.
+            index += 1
+            while index < len(words) and _is_option_value(words[index]):
+                index += 1
+            continue
         index += 1
         if option in _MTL_VECTOR_OPTIONS:
             while index < len(words) and _is_number(words[index]):
                 index += 1
         else:
-            index += _MTL_OPTION_ARITY.get(option, 1)
+            index += _MTL_OPTION_ARITY[option]
     return " ".join(words[index:])
+
+
+def _is_option_value(word: str) -> bool:
+    return word.lower() in ("on", "off") or _is_number(word)
 
 
 def _is_number(word: str) -> bool:
