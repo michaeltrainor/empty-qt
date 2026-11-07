@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import struct
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -560,25 +561,132 @@ def _rgb(
 
 
 def _read_glb(path: Path) -> tuple[object, bytes | None]:
-    """Return the JSON chunk and the BIN chunk of a binary glTF."""
-    with path.open("rb") as stream:
-        header = stream.read(12)
-        if len(header) < 12 or header[:4] != _GLB_MAGIC:
-            msg = "not a GLB file"
-            raise ValueError(msg)
-        document: object = None
-        binary: bytes | None = None
-        while True:
-            chunk_header = stream.read(8)
-            if len(chunk_header) < 8:
-                break
-            length, kind = struct.unpack("<II", chunk_header)
-            payload = stream.read(length)
-            if kind == _GLB_JSON_CHUNK:
-                document = json.loads(payload.decode("utf-8"))
-            elif kind == _GLB_BIN_CHUNK and binary is None:
-                binary = payload
-        if document is None:
-            msg = "GLB has no JSON chunk"
-            raise ValueError(msg)
-        return document, binary
+    """Return the JSON chunk and the BIN chunk of a binary glTF file."""
+    return split_glb(path.read_bytes())
+
+
+def split_glb(data: bytes) -> tuple[dict[str, object], bytes | None]:
+    """Split a GLB container into its JSON document and first BIN chunk.
+
+    Args:
+        data: The whole file.
+
+    Returns:
+        The parsed JSON and the binary chunk, or ``None`` when there is none.
+
+    Raises:
+        ValueError: When ``data`` is not a GLB container or has no JSON.
+    """
+    if len(data) < 12 or data[:4] != _GLB_MAGIC:
+        msg = "not a GLB file"
+        raise ValueError(msg)
+    document: object = None
+    binary: bytes | None = None
+    offset = 12
+    while offset + 8 <= len(data):
+        length, kind = struct.unpack_from("<II", data, offset)
+        offset += 8
+        payload = data[offset : offset + length]
+        offset += length
+        if kind == _GLB_JSON_CHUNK:
+            document = json.loads(payload.decode("utf-8"))
+        elif kind == _GLB_BIN_CHUNK and binary is None:
+            binary = payload
+    if not isinstance(document, dict):
+        msg = "GLB has no JSON chunk"
+        raise ValueError(msg)
+    return document, binary
+
+
+def join_glb(document: dict[str, object], binary: bytes | None) -> bytes:
+    """Pack a JSON document and an optional BIN chunk into a GLB container.
+
+    Args:
+        document: glTF JSON.
+        binary: Buffer 0 contents, or ``None``.
+
+    Returns:
+        The file bytes, chunks padded to four bytes as the spec requires.
+    """
+    payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    payload += b" " * (-len(payload) % 4)
+    chunks = struct.pack("<II", len(payload), _GLB_JSON_CHUNK) + payload
+    if binary is not None:
+        padded = binary + b"\0" * (-len(binary) % 4)
+        chunks += struct.pack("<II", len(padded), _GLB_BIN_CHUNK) + padded
+    return struct.pack("<4sII", _GLB_MAGIC, 2, 12 + len(chunks)) + chunks
+
+
+@dataclass(frozen=True, slots=True)
+class ImportedLight:
+    """A ``KHR_lights_punctual`` light on a node.
+
+    Args:
+        node: trimesh node name the light sits on.
+        kind: ``directional``, ``point``, or ``spot``.
+        color: Linear RGB, 0 to 1.
+        intensity: Candela for point and spot lights, lux for directional.
+        range: Cut-off distance, or ``0.0`` for none.
+        outer_cone: Spot outer cone half-angle in radians.
+    """
+
+    node: str
+    kind: str
+    color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    intensity: float = 1.0
+    range: float = 0.0
+    outer_cone: float = math.pi / 4
+
+
+def read_lights(document: GltfDocument) -> list[ImportedLight]:
+    """Return the file's punctual lights, keyed by trimesh node name.
+
+    Node names are made unique the way trimesh does, with the node index
+    as the fallback name, so they match the scene graph the importer sees.
+
+    Args:
+        document: An open glTF document.
+    """
+    extensions = document.document.get("extensions")
+    if not isinstance(extensions, dict):
+        return []
+    punctual = extensions.get("KHR_lights_punctual")
+    if not isinstance(punctual, dict):
+        return []
+    definitions = punctual.get("lights")
+    if not isinstance(definitions, list):
+        return []
+    lights: list[ImportedLight] = []
+    names: dict[str, int] = {}
+    counts: dict[str | None, int] = {}
+    for index, node in enumerate(document.entries("nodes")):
+        name = unique_name(str(node.get("name", index)), names, counts=counts)
+        names[name] = index
+        node_extensions = node.get("extensions")
+        if not isinstance(node_extensions, dict):
+            continue
+        reference = node_extensions.get("KHR_lights_punctual")
+        if not isinstance(reference, dict):
+            continue
+        light_index = reference.get("light")
+        if not isinstance(light_index, int) or not 0 <= light_index < len(definitions):
+            continue
+        definition = definitions[light_index]
+        if not isinstance(definition, dict):
+            continue
+        kind = definition.get("type")
+        if kind not in ("directional", "point", "spot"):
+            continue
+        spot = definition.get("spot")
+        spot = spot if isinstance(spot, dict) else {}
+        lights.append(
+            ImportedLight(
+                node=name,
+                kind=str(kind),
+                color=_rgb(definition.get("color"), (1.0, 1.0, 1.0)),
+                intensity=max(_number(definition.get("intensity"), 1.0), 0.0),
+                range=max(_number(definition.get("range"), 0.0), 0.0),
+                outer_cone=_number(spot.get("outerConeAngle"), math.pi / 4),
+            )
+        )
+    return lights

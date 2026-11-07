@@ -20,9 +20,11 @@ from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
 from scene_viewport.mesh.gltf_extras import (
     GltfDocument,
+    ImportedLight,
     MapSampling,
     PrimitiveExtras,
     SurfaceExtensions,
+    read_lights,
 )
 from scene_viewport.mesh.references import (
     FileStamp,
@@ -214,6 +216,7 @@ class ImportedModel:
             one image.
         warnings: Problems that didn't stop the load, such as a texture
             file that is missing or unreadable.
+        lights: ``KHR_lights_punctual`` lights, each naming its node.
     """
 
     path: Path
@@ -222,6 +225,7 @@ class ImportedModel:
     materials: Mapping[str, MaterialSurface | None]
     maps: Mapping[str, ImportedMaps]
     warnings: tuple[str, ...] = ()
+    lights: tuple[ImportedLight, ...] = ()
 
 
 def is_importable(path: Path) -> bool:
@@ -359,6 +363,7 @@ def _parse(path: Path) -> ImportedModel:
         materials=materials,
         maps=maps,
         warnings=(*reference_problems(path), *warnings),
+        lights=tuple(read_lights(document)) if document is not None else (),
     )
 
 

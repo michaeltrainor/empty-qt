@@ -46,6 +46,7 @@ from scene_viewport.components import (
     Space,
     TransformComponent,
 )
+from scene_viewport.export_gltf import export_scene
 from scene_viewport.gizmo import InteractionTool
 from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
 from scene_viewport.mesh.importer import (
@@ -281,6 +282,16 @@ class SceneViewportWindow(QMainWindow):
         import_action = QAction("Import...", self)
         import_action.triggered.connect(self._import_dialog)
         file_menu.addAction(import_action)
+
+        export_action = QAction("Export Scene...", self)
+        export_action.triggered.connect(lambda: self._export_dialog(selection=False))
+        file_menu.addAction(export_action)
+
+        export_selection_action = QAction("Export Selection...", self)
+        export_selection_action.triggered.connect(
+            lambda: self._export_dialog(selection=True)
+        )
+        file_menu.addAction(export_selection_action)
 
         reload_action = QAction("Reload Changed Files", self)
         reload_action.triggered.connect(self._reload_changed_files)
@@ -1185,6 +1196,66 @@ class SceneViewportWindow(QMainWindow):
         self._import_dir = paths[0].parent
         self._import_files(paths)
 
+    def _export_dialog(self, *, selection: bool) -> None:
+        """Export the scene, or the selected transforms, as glTF."""
+        roots: list[str] | None = None
+        if selection:
+            roots = self._selection_roots()
+            if not roots:
+                QMessageBox.information(
+                    self,
+                    "Export Selection",
+                    "Select one or more transforms first.",
+                    QMessageBox.StandardButton.Ok,
+                )
+                return
+        stem = self._scene_path.stem if self._scene_path is not None else "scene"
+        start = (
+            self._scene_path.parent if self._scene_path is not None else Path.home()
+        ) / f"{stem}.glb"
+        path_str, chosen = QFileDialog.getSaveFileName(
+            self,
+            "Export Selection" if selection else "Export Scene",
+            str(start),
+            "Binary glTF (*.glb);;glTF JSON (*.gltf)",
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.suffix.lower() not in (".glb", ".gltf"):
+            path = path.with_suffix(".gltf" if "gltf" in chosen.lower() else ".glb")
+        self.export_path(path, roots=roots)
+
+    def export_path(self, path: Path, *, roots: Sequence[str] | None = None) -> bool:
+        """Write the scene (or ``roots`` with their descendants) as glTF.
+
+        Args:
+            path: ``.glb`` or ``.gltf`` destination.
+            roots: Transform UIDs to export, or ``None`` for the whole scene.
+
+        Returns:
+            ``True`` when the file was written.
+        """
+        try:
+            result = export_scene(self._world, path, roots=roots)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Export", f"Could not export:\n{exc}")
+            return False
+        self._remember_recent(path)
+        noun = "mesh" if result.meshes == 1 else "meshes"
+        self.statusBar().showMessage(
+            f"Exported {result.transforms} nodes, {result.meshes} {noun}, "
+            f"{result.lights} lights to {path.name}",
+            6000,
+        )
+        if result.warnings:
+            QMessageBox.warning(
+                self,
+                "Export",
+                "Exported with these omissions:\n" + "\n".join(result.warnings),
+            )
+        return True
+
     def _import_files(self, paths: Sequence[Path], *, report: bool = True) -> list[str]:
         """Import model files as one undo step; return the new root names.
 
@@ -1218,20 +1289,25 @@ class SceneViewportWindow(QMainWindow):
                     conversion=conversion,
                 )
             )
+            warnings.extend(results[-1].warnings)
         roots = [result.root for result in results]
         if results:
             transforms = [t for result in results for t in result.objects.transforms]
             meshes = [m for result in results for m in result.objects.meshes]
+            lights = [light for result in results for light in result.objects.lights]
             for transform in transforms:
                 self._register_transform(transform)
             for mesh in meshes:
                 self._register_mesh(mesh)
+            for light in lights:
+                self._register_light(light)
             self._history.push(
                 HistoryStep(
                     label="Import",
                     added=SceneObjects(
                         transforms=[t.model_copy(deep=True) for t in transforms],
                         meshes=[m.model_copy(deep=True) for m in meshes],
+                        lights=[light.model_copy(deep=True) for light in lights],
                     ),
                 )
             )
