@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Scene viewport import gaps closed:
+  - Textured mode (6) also uses glTF roughness/metal, normal, and emissive
+    maps. Normal-mapped meshes get computed tangents, so normal maps work
+    in the top, front, and side views too.
+  - Preferences → Import Up Axis and Import Units convert OBJ, STL, and
+    PLY files to the scene's Y-up metres. Auto turns STL and PLY Z-up
+    files upright; glTF is always Y-up metres.
+  - Model, material, and texture files edited outside the app reload when
+    the window is activated again, or with File → Reload Changed Files.
+  - Import and Open warn about texture files that are missing or
+    unreadable; those parts show the material color.
 - Scene viewport: imported models bring their base color texture (glTF,
   embedded or external, and OBJ). Textured mode (6) shows it; a Mesh tab
   Albedo Map still overrides it. Adds `pillow` to the app's dependencies.

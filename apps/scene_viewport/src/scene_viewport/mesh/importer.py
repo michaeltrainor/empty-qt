@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 from collections.abc import Iterable, Mapping
@@ -15,6 +16,11 @@ from PIL import Image
 from trimesh.visual import ColorVisuals
 from trimesh.visual.material import PBRMaterial, SimpleMaterial
 
+from scene_viewport.mesh.references import (
+    FileStamp,
+    reference_problems,
+    source_signature,
+)
 from scene_viewport.mesh.types import MeshBuffers
 
 _log = logging.getLogger(__name__)
@@ -47,6 +53,27 @@ class ImportedMaterial:
 
 
 @dataclass(frozen=True, slots=True)
+class ImportedMaps:
+    """Texture images of one mesh, RGBA ``(height, width, 4)``, top row first.
+
+    Args:
+        base_color: Color image (sRGB).
+        metallic_roughness: glTF packed map (linear): roughness in green,
+            metalness in blue.
+        normal: Tangent-space normal map (linear).
+        emissive: Emitted color image (sRGB).
+        emissive_factor: Linear RGB multiplier for ``emissive``. glTF's
+            default is black, which turns emission off.
+    """
+
+    base_color: NDArray[np.uint8] | None = None
+    metallic_roughness: NDArray[np.uint8] | None = None
+    normal: NDArray[np.uint8] | None = None
+    emissive: NDArray[np.uint8] | None = None
+    emissive_factor: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+@dataclass(frozen=True, slots=True)
 class ImportedNode:
     """One node of a model's hierarchy.
 
@@ -73,16 +100,18 @@ class ImportedModel:
         meshes: Triangle buffers by mesh key.
         materials: Material for each mesh key, or ``None`` when the file has
             none for it.
-        textures: Base color image for each textured mesh key, RGBA
-            ``(height, width, 4)`` with the top row first. Meshes without
-            UVs or an image have no entry.
+        maps: Texture images for each mesh key that has UVs and at least
+            one image.
+        warnings: Problems that didn't stop the load, such as a texture
+            file that is missing or unreadable.
     """
 
     path: Path
     nodes: tuple[ImportedNode, ...]
     meshes: Mapping[str, MeshBuffers]
     materials: Mapping[str, ImportedMaterial | None]
-    textures: Mapping[str, NDArray[np.uint8]]
+    maps: Mapping[str, ImportedMaps]
+    warnings: tuple[str, ...] = ()
 
 
 def is_importable(path: Path) -> bool:
@@ -116,6 +145,9 @@ def importable_paths(paths: Iterable[Path]) -> list[Path]:
 def load_model(path: Path) -> ImportedModel:
     """Read a model file, reusing the parsed result while it is unchanged.
 
+    "Unchanged" covers the files it refers to as well (glTF buffers and
+    images, OBJ materials and textures), so editing a texture reloads.
+
     Args:
         path: Model file to read.
 
@@ -131,16 +163,16 @@ def load_model(path: Path) -> ImportedModel:
         raise ModelImportError(msg)
     resolved = path.resolve()
     try:
-        stat = resolved.stat()
+        resolved.stat()
     except OSError as exc:
         msg = f"cannot read {path}: {exc.strerror or exc}"
         raise ModelImportError(msg) from exc
-    return _load_cached(resolved, stat.st_mtime_ns, stat.st_size)
+    return _load_cached(resolved, source_signature(resolved))
 
 
 @functools.lru_cache(maxsize=_CACHE_SIZE)
-def _load_cached(path: Path, _mtime_ns: int, _size: int) -> ImportedModel:
-    """Parse ``path``; the stat values only key the cache."""
+def _load_cached(path: Path, _signature: tuple[FileStamp, ...]) -> ImportedModel:
+    """Parse ``path``; the signature only keys the cache."""
     trimesh_log = logging.getLogger("trimesh")
     level = trimesh_log.level
     # trimesh logs tracebacks for optional packages it can do without.
@@ -168,16 +200,27 @@ def _parse(path: Path) -> ImportedModel:
 
     meshes: dict[str, MeshBuffers] = {}
     materials: dict[str, ImportedMaterial | None] = {}
-    textures: dict[str, NDArray[np.uint8]] = {}
+    maps: dict[str, ImportedMaps] = {}
     for key, geometry in scene.geometry.items():
         if not isinstance(geometry, trimesh.Trimesh) or len(geometry.faces) == 0:
             _log.info("skipping non-triangle geometry %r in %s", key, path.name)
             continue
-        meshes[key] = _buffers(geometry)
+        buffers = _buffers(geometry)
         materials[key] = _material(geometry)
-        texture = _texture(geometry)
-        if texture is not None:
-            textures[key] = texture
+        mesh_maps = _maps(geometry)
+        if mesh_maps is not None:
+            maps[key] = mesh_maps
+            if mesh_maps.normal is not None:
+                buffers = dataclasses.replace(
+                    buffers,
+                    tangents=vertex_tangents(
+                        buffers.positions,
+                        buffers.normals,
+                        buffers.texcoords,
+                        buffers.indices,
+                    ),
+                )
+        meshes[key] = buffers
     if not meshes:
         msg = f"{path.name} has no triangle meshes"
         raise ModelImportError(msg)
@@ -187,7 +230,8 @@ def _parse(path: Path) -> ImportedModel:
         nodes=tuple(_nodes(scene, meshes)),
         meshes=meshes,
         materials=materials,
-        textures=textures,
+        maps=maps,
+        warnings=tuple(reference_problems(path)),
     )
 
 
@@ -288,22 +332,107 @@ def vertex_normals(
     return np.ascontiguousarray(summed / length[:, None], dtype=np.float32)
 
 
-def _texture(geometry: trimesh.Trimesh) -> NDArray[np.uint8] | None:
-    """Return the base color image as RGBA, when the mesh has one and UVs."""
+def _maps(geometry: trimesh.Trimesh) -> ImportedMaps | None:
+    """Read a mesh's texture images, when it has UVs and any image."""
     visual = geometry.visual
     uv = getattr(visual, "uv", None)
     if uv is None or len(uv) != len(geometry.vertices):
         return None
     material = getattr(visual, "material", None)
     if isinstance(material, PBRMaterial):
-        image = material.baseColorTexture
+        factor = material.emissiveFactor
+        maps = ImportedMaps(
+            base_color=_rgba(material.baseColorTexture),
+            metallic_roughness=_rgba(material.metallicRoughnessTexture),
+            normal=_rgba(material.normalTexture),
+            emissive=_rgba(material.emissiveTexture),
+            emissive_factor=_rgb(factor) if factor is not None else (0.0, 0.0, 0.0),
+        )
     elif isinstance(material, SimpleMaterial):
-        image = material.image
+        maps = ImportedMaps(base_color=_rgba(material.image))
     else:
         return None
+    images = (maps.base_color, maps.metallic_roughness, maps.normal, maps.emissive)
+    if all(image is None for image in images):
+        return None
+    return maps
+
+
+def _rgba(image: object) -> NDArray[np.uint8] | None:
+    """Convert a Pillow image to an RGBA array, top row first."""
     if not isinstance(image, Image.Image):
         return None
     return np.array(image.convert("RGBA"), dtype=np.uint8)
+
+
+def _rgb(values: object) -> tuple[float, float, float]:
+    """Read three 0-1 floats from a factor array."""
+    red, green, blue = (float(v) for v in np.asarray(values, dtype=np.float64)[:3])
+    return (red, green, blue)
+
+
+def vertex_tangents(
+    positions: NDArray[np.float32],
+    normals: NDArray[np.float32],
+    texcoords: NDArray[np.float32],
+    faces: NDArray[np.uint32],
+) -> NDArray[np.float32]:
+    """Return per-vertex tangents for normal mapping.
+
+    Each triangle's +U and +V directions are summed onto its vertices, the
+    +U sum is made perpendicular to the normal, and ``w`` records whether
+    +V agrees with ``cross(normal, tangent)``. UVs use a bottom-left origin,
+    so +V is the image's up, where OpenGL-style (glTF) normal maps point
+    green.
+
+    Args:
+        positions: Vertex positions, shape ``(N, 3)``.
+        normals: Unit vertex normals, shape ``(N, 3)``.
+        texcoords: UVs, shape ``(N, 2)``.
+        faces: Triangle indices, shape ``(T, 3)``.
+
+    Returns:
+        ``(N, 4)`` float32 tangents. A vertex without usable UVs gets any
+        unit vector perpendicular to its normal and ``w = 1``.
+    """
+    points = np.asarray(positions, dtype=np.float64)
+    uv = np.asarray(texcoords, dtype=np.float64)
+    normal = np.asarray(normals, dtype=np.float64)
+    edge1 = points[faces[:, 1]] - points[faces[:, 0]]
+    edge2 = points[faces[:, 2]] - points[faces[:, 0]]
+    duv1 = uv[faces[:, 1]] - uv[faces[:, 0]]
+    duv2 = uv[faces[:, 2]] - uv[faces[:, 0]]
+    det = duv1[:, 0] * duv2[:, 1] - duv2[:, 0] * duv1[:, 1]
+    usable = np.abs(det) > 1e-20
+    inverse = np.where(usable, 1.0 / np.where(usable, det, 1.0), 0.0)[:, None]
+    face_u = (edge1 * duv2[:, 1:2] - edge2 * duv1[:, 1:2]) * inverse
+    face_v = (edge2 * duv1[:, 0:1] - edge1 * duv2[:, 0:1]) * inverse
+    count = len(points)
+    sum_u = np.zeros((count, 3))
+    sum_v = np.zeros((count, 3))
+    for corner in range(3):
+        for axis in range(3):
+            sum_u[:, axis] += np.bincount(
+                faces[:, corner], weights=face_u[:, axis], minlength=count
+            )
+            sum_v[:, axis] += np.bincount(
+                faces[:, corner], weights=face_v[:, axis], minlength=count
+            )
+    tangent = sum_u - normal * np.sum(normal * sum_u, axis=1, keepdims=True)
+    length = np.linalg.norm(tangent, axis=1)
+    missing = length <= 1e-12
+    if np.any(missing):
+        # Any direction perpendicular to the normal.
+        helper = np.where(
+            np.abs(normal[missing, 0:1]) < 0.9, [[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]]
+        )
+        tangent[missing] = np.cross(normal[missing], helper)
+        length[missing] = np.linalg.norm(tangent[missing], axis=1)
+    length[length <= 1e-12] = 1.0
+    tangent /= length[:, None]
+    handed = np.sum(np.cross(normal, tangent) * sum_v, axis=1)
+    w = np.where(handed < 0.0, -1.0, 1.0)
+    return np.ascontiguousarray(np.column_stack([tangent, w]), dtype=np.float32)
 
 
 def _material(geometry: trimesh.Trimesh) -> ImportedMaterial | None:

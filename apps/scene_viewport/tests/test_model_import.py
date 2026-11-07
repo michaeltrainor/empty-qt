@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -189,7 +190,7 @@ def test_file_geometry_and_unknown_mesh(tmp_path: Path) -> None:
 
 def test_missing_source_draws_a_placeholder_once(tmp_path: Path) -> None:
     """Viewport logic, run with a stand-in ``self`` (no GPU window)."""
-    host = SimpleNamespace(_missing_sources=[])
+    host = SimpleNamespace(_missing_sources=[], _source_stamps={})
     missing = MeshComponent(
         name="gone",
         transform="t",
@@ -276,3 +277,83 @@ def test_stl_without_normals_loads_faceted(tmp_path: Path) -> None:
     buffers = next(iter(load_model(path).meshes.values()))
     # Split vertices: every corner normal is one of the six face directions.
     assert np.allclose(np.abs(buffers.normals).max(axis=1), 1.0)
+
+
+def test_import_conversion_rules() -> None:
+    from scene_viewport.model_import import import_conversion
+
+    up = np.array([0.0, 0.0, 1.0, 1.0])
+    # STL and PLY are Z-up by default: file +Z becomes scene +Y.
+    for name in ("part.stl", "scan.PLY"):
+        assert np.allclose(import_conversion(Path(name)) @ up, (0.0, 1.0, 0.0, 1.0))
+    # OBJ keeps Y-up unless told otherwise; glTF is never converted.
+    assert np.allclose(import_conversion(Path("a.obj")), np.eye(4))
+    assert np.allclose(import_conversion(Path("a.glb"), "z", "mm"), np.eye(4))
+    z_mm = import_conversion(Path("a.obj"), "z", "mm")
+    assert np.allclose(z_mm @ np.array([0.0, 0.0, 1000.0, 1.0]), (0.0, 1.0, 0.0, 1.0))
+    assert np.allclose(
+        import_conversion(Path("a.stl"), "y", "in")[:3, :3], np.eye(3) * 0.0254
+    )
+
+
+def test_import_objects_applies_the_conversion_to_the_root(tmp_path: Path) -> None:
+    from scene_viewport.model_import import import_conversion
+
+    stl = tmp_path / "part.stl"
+    trimesh.creation.box().export(stl)
+    single = import_objects(
+        load_model(stl), set(), conversion=import_conversion(stl, "auto", "mm")
+    )
+    (root,) = single.objects.transforms
+    assert root.rotation == pytest.approx((-math.pi / 2, 0.0, 0.0))
+    assert root.scale == pytest.approx((0.001, 0.001, 0.001))
+    car = load_model(_car(tmp_path / "car.glb"))
+    nested = import_objects(
+        car, set(), conversion=import_conversion(car.path, "z", "cm")
+    )
+    # glTF ignores the setting; the root stays at identity.
+    assert nested.objects.transforms[0].scale == pytest.approx((1.0, 1.0, 1.0))
+
+
+def test_reload_changed_sources_refreshes_only_edited_meshes(tmp_path: Path) -> None:
+    """Viewport reload logic, run with a stand-in ``self`` (no GPU window)."""
+    from scene_viewport.mesh.references import source_signature
+
+    path = tmp_path / "ball.obj"
+    trimesh.creation.icosphere(subdivisions=1).export(path)
+    key = load_model(path).nodes[0].mesh
+    mesh = MeshComponent(
+        name="ballShape", transform="ball", kind="file", source=path, source_mesh=key
+    )
+    box = MeshComponent(name="boxShape", transform="box", kind="box")
+    swapped: list[str] = []
+    redrawn: list[str] = []
+    host = SimpleNamespace(
+        _albedo_stamps={},
+        _albedo_cache={
+            f"{path}#{key}#base_color": object(),
+            "other#x#normal": object(),
+        },
+        _mesh_components={"ballShape": mesh, "boxShape": box},
+        _source_stamps={"ballShape": source_signature(path)},
+        _set_mesh_geometry=lambda name, _geometry: swapped.append(name),
+        _apply_draw_mode_to_mesh=redrawn.append,
+        _apply_highlights=lambda: None,
+        _canvas=SimpleNamespace(request_draw=lambda: None),
+    )
+    reload = ViewportController.reload_changed_sources
+    assert reload(host) == []  # type: ignore[arg-type]
+    trimesh.creation.icosphere(subdivisions=2).export(path)
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    assert reload(host) == ["ballShape"]  # type: ignore[arg-type]
+    assert swapped == ["ballShape"]
+    assert redrawn == ["ballShape"]
+    # Its cached textures are dropped; other meshes' are kept.
+    assert list(host._albedo_cache) == ["other#x#normal"]
+    assert reload(host) == []  # type: ignore[arg-type]
+    # A file that breaks keeps the old shape and is retried later.
+    path.write_text("not an obj with faces\n", encoding="utf-8")
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+    assert reload(host) == []  # type: ignore[arg-type]
+    assert swapped == ["ballShape"]

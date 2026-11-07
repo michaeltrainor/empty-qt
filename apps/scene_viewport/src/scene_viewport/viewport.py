@@ -36,9 +36,14 @@ from scene_viewport.gizmo import (
 )
 from scene_viewport.mesh.geometry import file_geometry, geometry_for
 from scene_viewport.mesh.importer import ModelImportError
+from scene_viewport.mesh.references import (
+    FileStamp,
+    file_stamp,
+    source_signature,
+)
 from scene_viewport.navigation import navigation_controls
 from scene_viewport.settings import AppSettings, renderer_gamma
-from scene_viewport.textures import file_texture, load_albedo_texture
+from scene_viewport.textures import file_maps, load_albedo_texture, texture_from_rgba
 from scene_viewport.xform_math import (
     as_vec3,
     average_positions,
@@ -103,6 +108,10 @@ DrawMode = Literal[
     "textured",
 ]
 _LIT_DRAW_MODES = frozenset({"shaded", "textured", "wire_shaded"})
+#: Texture images an imported mesh can carry (fields of ``ImportedMaps``).
+MapKind = Literal["base_color", "metallic_roughness", "normal", "emissive"]
+#: Maps holding colors (sRGB); the others hold linear data.
+_COLOR_MAPS = frozenset({"base_color", "emissive"})
 ViewPreset = Literal["perspective", "top", "front", "side"]
 # Look direction per preset. Top tilts a hair off vertical so the orbit
 # controller's +Y reference up never becomes degenerate.
@@ -186,6 +195,10 @@ class ViewportController:
         self._albedo_cache: dict[str, gfx.Texture | None] = {}
         # Model files that failed to load since take_missing_sources().
         self._missing_sources: list[Path] = []
+        # File state when each texture or file mesh was last read, so
+        # reload_changed_sources() can tell what was edited on disk.
+        self._albedo_stamps: dict[str, FileStamp] = {}
+        self._source_stamps: dict[str, tuple[FileStamp, ...]] = {}
         self._light_aim: gfx.WorldObject | None = None
         # Pinned (near, far) for each patched point or spot shadow.
         # See _pin_perspective_shadow_depth.
@@ -379,13 +392,26 @@ class ViewportController:
         if key and key != ".":
             if key not in self._albedo_cache:
                 self._albedo_cache[key] = load_albedo_texture(component.albedo_map)
+                self._albedo_stamps[key] = file_stamp(component.albedo_map)
             return self._albedo_cache[key]
+        return self._file_texture(component, "base_color")
+
+    def _file_texture(
+        self,
+        component: MeshComponent,
+        kind: MapKind,
+    ) -> gfx.Texture | None:
+        """Return a cached texture of ``kind`` from a ``file`` mesh's source."""
         if component.kind != "file":
             return None
-        key = f"{component.source}#{component.source_mesh}"
+        key = f"{component.source}#{component.source_mesh}#{kind}"
         if key not in self._albedo_cache:
-            self._albedo_cache[key] = file_texture(
-                component.source, component.source_mesh
+            maps = file_maps(component.source, component.source_mesh)
+            pixels = getattr(maps, kind) if maps is not None else None
+            self._albedo_cache[key] = (
+                texture_from_rgba(pixels, color=kind in _COLOR_MAPS)
+                if pixels is not None
+                else None
             )
         return self._albedo_cache[key]
 
@@ -407,7 +433,30 @@ class ViewportController:
             texture = self._albedo_texture(component)
             if texture is not None:
                 material.map = gfx.TextureMap(texture)
+            self._apply_file_maps(material, component)
         return material
+
+    def _apply_file_maps(
+        self,
+        material: gfx.MeshStandardMaterial,
+        component: MeshComponent,
+    ) -> None:
+        """Add an imported mesh's roughness/metal, normal, and emissive maps."""
+        packed = self._file_texture(component, "metallic_roughness")
+        if packed is not None:
+            # glTF packs roughness in green and metalness in blue, the
+            # channels pygfx samples for each map.
+            material.roughness_map = gfx.TextureMap(packed)
+            material.metalness_map = gfx.TextureMap(packed)
+        normal = self._file_texture(component, "normal")
+        if normal is not None:
+            material.normal_map = gfx.TextureMap(normal)
+        emissive = self._file_texture(component, "emissive")
+        maps = file_maps(component.source, component.source_mesh)
+        if emissive is not None and maps is not None and any(maps.emissive_factor):
+            material.emissive_map = gfx.TextureMap(emissive)
+            # glTF factors are linear; pygfx colors are sRGB.
+            material.emissive = gfx.Color.from_physical(*maps.emissive_factor)
 
     @property
     def draw_mode(self) -> DrawMode:
@@ -1018,6 +1067,7 @@ class ViewportController:
         if mesh is None:
             return
         self._mesh_components.pop(name, None)
+        self._source_stamps.pop(name, None)
         outline = self._outlines.pop(name, None)
         draw_wire = self._draw_wires.pop(name, None)
         bbox = self._bboxes.pop(name, None)
@@ -1309,10 +1359,66 @@ class ViewportController:
         self._missing_sources = []
         return missing
 
+    def reload_changed_sources(self) -> list[str]:
+        """Reload meshes whose model, material, or texture files changed.
+
+        A model file that can't be read now keeps its current geometry, and
+        is tried again on the next call.
+
+        Returns:
+            Names of the meshes that were refreshed.
+        """
+        stale = {
+            key
+            for key, stamp in self._albedo_stamps.items()
+            if file_stamp(Path(key)) != stamp
+        }
+        for key in stale:
+            self._albedo_cache.pop(key, None)
+            self._albedo_stamps.pop(key, None)
+        reloaded: list[str] = []
+        for name, component in self._mesh_components.items():
+            changed = str(component.albedo_map).strip() in stale
+            if component.kind == "file":
+                signature = source_signature(component.source)
+                if signature != self._source_stamps.get(name):
+                    try:
+                        geometry = file_geometry(
+                            component.source, component.source_mesh
+                        )
+                    except ModelImportError as exc:
+                        _log.warning("%s: %s; keeping the old shape", name, exc)
+                        continue
+                    self._source_stamps[name] = signature
+                    self._set_mesh_geometry(name, geometry)
+                    prefix = f"{component.source}#{component.source_mesh}#"
+                    for key in [k for k in self._albedo_cache if k.startswith(prefix)]:
+                        del self._albedo_cache[key]
+                    changed = True
+            if changed:
+                self._apply_draw_mode_to_mesh(name)
+                reloaded.append(name)
+        if reloaded:
+            self._apply_highlights()
+            self._canvas.request_draw()
+        return reloaded
+
+    def _set_mesh_geometry(self, name: str, geometry: gfx.Geometry) -> None:
+        """Swap a mesh's geometry, with its outline, wireframe, and bbox."""
+        mesh = self._meshes[name]
+        mesh.geometry = geometry
+        for helper in (self._outlines.get(name), self._draw_wires.get(name)):
+            if helper is not None:
+                helper.geometry = geometry
+        bbox = self._bboxes.get(name)
+        if bbox is not None:
+            bbox.geometry = self._aabb_line_geometry(mesh)
+
     def _geometry_for(self, component: MeshComponent) -> gfx.Geometry:
         """Tessellate a primitive, or read a ``file`` mesh's source."""
         if component.kind != "file":
             return geometry_for(component.kind)
+        self._source_stamps[component.name] = source_signature(component.source)
         try:
             return file_geometry(component.source, component.source_mesh)
         except ModelImportError as exc:

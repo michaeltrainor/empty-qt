@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
-from PySide6.QtCore import QKeyCombination, QMimeData, Qt
+from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, Qt
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -51,7 +51,11 @@ from scene_viewport.mesh.importer import (
     load_model,
 )
 from scene_viewport.mesh.types import PrimitiveKind
-from scene_viewport.model_import import ImportResult, import_objects
+from scene_viewport.model_import import (
+    ImportResult,
+    import_conversion,
+    import_objects,
+)
 from scene_viewport.navigation import NAVIGATION_HINTS
 from scene_viewport.scene import (
     FOLDER_NAMES,
@@ -242,6 +246,10 @@ class SceneViewportWindow(QMainWindow):
         import_action = QAction("Import...", self)
         import_action.triggered.connect(self._import_dialog)
         file_menu.addAction(import_action)
+
+        reload_action = QAction("Reload Changed Files", self)
+        reload_action.triggered.connect(self._reload_changed_files)
+        file_menu.addAction(reload_action)
 
         create_menu = self.menuBar().addMenu("&Create")
         create_menu.addAction("Empty Transform", self._create_empty)
@@ -903,15 +911,22 @@ class SceneViewportWindow(QMainWindow):
             return
         self._replace_scene(document)
         self._set_scene_path(path)
+        problems: list[str] = []
         missing = self._viewport.take_missing_sources()
         if missing:
             listed = "\n".join(str(source) for source in missing)
-            QMessageBox.warning(
-                self,
-                "Open Scene",
+            problems.append(
                 "These model files could not be loaded and are shown as boxes:\n"
-                + listed,
+                + listed
             )
+        warnings = self._source_warnings()
+        if warnings:
+            problems.append(
+                "Some files these models use could not be loaded; those parts "
+                "show the material color:\n" + "\n".join(warnings)
+            )
+        if problems:
+            QMessageBox.warning(self, "Open Scene", "\n\n".join(problems))
 
     def _import_dialog(self) -> None:
         patterns = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
@@ -935,13 +950,27 @@ class SceneViewportWindow(QMainWindow):
         used = self._used_names()
         results: list[ImportResult] = []
         failures: list[str] = []
+        warnings: list[str] = []
         for path in paths:
             try:
                 model = load_model(path)
             except ModelImportError as exc:
                 failures.append(str(exc))
                 continue
-            results.append(import_objects(model, used, space=self._edit_space))
+            warnings.extend(model.warnings)
+            conversion = import_conversion(
+                path,
+                self._settings.import_up_axis,
+                self._settings.import_unit,
+            )
+            results.append(
+                import_objects(
+                    model,
+                    used,
+                    space=self._edit_space,
+                    conversion=conversion,
+                )
+            )
         roots = [result.root for result in results]
         if results:
             transforms = [t for result in results for t in result.objects.transforms]
@@ -962,13 +991,47 @@ class SceneViewportWindow(QMainWindow):
             self._rebuild_tree(roots)
             # Models come in any size (often millimetres), so show them.
             self._viewport.frame_selection(roots)
+        problems: list[str] = []
         if failures:
-            QMessageBox.warning(
-                self,
-                "Import",
-                "Could not import:\n" + "\n".join(failures),
+            problems.append("Could not import:\n" + "\n".join(failures))
+        if warnings:
+            problems.append(
+                "Some files these models use could not be loaded; those parts "
+                "show the material color:\n" + "\n".join(warnings)
             )
+        if problems:
+            QMessageBox.warning(self, "Import", "\n\n".join(problems))
         return roots
+
+    def _source_warnings(self) -> list[str]:
+        """Warnings from every model file the scene uses, each file once."""
+        warnings: list[str] = []
+        sources = {
+            mesh.source for mesh in self._world.iter_meshes() if mesh.kind == "file"
+        }
+        for source in sorted(sources):
+            try:
+                warnings.extend(load_model(source).warnings)
+            except ModelImportError:
+                # Reported as a missing source instead.
+                continue
+        return warnings
+
+    def _reload_changed_files(self) -> None:
+        """Pick up model and texture files edited outside the app."""
+        reloaded = self._viewport.reload_changed_sources()
+        if reloaded:
+            count = len(reloaded)
+            noun = "mesh" if count == 1 else "meshes"
+            self.statusBar().showMessage(
+                f"Reloaded {count} {noun} from changed files", 5000
+            )
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        # Coming back from an image editor or DCC: reload what was saved.
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._reload_changed_files()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if dropped_models(event.mimeData()):

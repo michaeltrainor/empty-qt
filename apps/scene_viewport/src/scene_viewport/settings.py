@@ -13,6 +13,8 @@ from scene_viewport.navigation import NavigationStyle
 Space = Literal["local", "world"]
 BackgroundMode = Literal["solid", "gradient", "skybox"]
 ShadowCull = Literal["front", "back", "none"]
+ImportUpAxis = Literal["auto", "y", "z"]
+ImportUnit = Literal["auto", "m", "cm", "mm", "in"]
 
 _SETTINGS_DIR = Path.home() / ".config" / "mtqt"
 SETTINGS_PATH = _SETTINGS_DIR / "scene_viewport.json"
@@ -53,6 +55,22 @@ class AppSettings(BaseModel):
         le=180.0,
         title="Rotate Snap Step",
         description="Degrees per step while snapping (X or hold Ctrl).",
+    )
+    import_up_axis: ImportUpAxis = Field(
+        default="auto",
+        title="Import Up Axis",
+        description=(
+            "Up axis of imported OBJ, STL, and PLY files. Auto: Z for STL and "
+            "PLY, Y for OBJ. glTF is always Y-up."
+        ),
+    )
+    import_unit: ImportUnit = Field(
+        default="auto",
+        title="Import Units",
+        description=(
+            "Units of imported OBJ, STL, and PLY files, converted to scene "
+            "units (metres). Auto keeps the numbers. glTF is always metres."
+        ),
     )
     show_grid: bool = Field(default=True, title="Show Grid")
     show_axes: bool = Field(
