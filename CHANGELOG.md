@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- `TimelineBar`: transport controls for clip playback (play / pause,
+  stop, loop, clip picker, scrub slider, time readout, speed). The host
+  owns the clock; the bar emits only for user actions, and its setters
+  stay silent so `set_time` can run every tick. Example in
+  `examples/timeline_bar.py`.
+- Scene viewport: glTF animations play. Opening or importing a file with
+  `animations` reads its translation, rotation, and scale channels
+  (STEP, LINEAR, and CUBICSPLINE) into clips saved with the scene, and a
+  timeline bar appears under the viewport: play / pause (Space), stop,
+  loop, clip, scrub, and speed. Playback poses the viewport only; the
+  stored transforms stay the rest pose, nothing is recorded in undo, and
+  Stop restores it. While a pose is shown the Transform tab is read-only
+  for animated transforms, and a gizmo drag or reparent on one stops
+  playback first. Deleting an animated transform drops its channels
+  (undo restores them) and renaming retargets them. Morph target
+  weights, `KHR_animation_pointer` targets, and channels on nodes that
+  were not imported are skipped with a warning; skinned meshes do not
+  deform. Export leaves clips out. The sample survey report now counts
+  clips and channels per model.
 - Scene viewport: cameras are scene objects. Create → Cameras adds a
   perspective or orthographic camera on a transform aimed at the scene,
   shown as a frustum helper in a new `cam` outliner folder, with a Camera

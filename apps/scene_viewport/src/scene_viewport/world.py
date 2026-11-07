@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
 
+from scene_viewport.animation import AnimationClip
 from scene_viewport.components import (
     CameraComponent,
     LightComponent,
@@ -20,10 +21,11 @@ from scene_viewport.scene_io import SceneDocument
 
 
 class SceneWorld:
-    """Owns transforms, meshes, and lights keyed by stable string UIDs.
+    """Owns transforms, meshes, lights, cameras, and clips keyed by name.
 
     Keeps reverse indexes (shape → transform, transform → shapes) in sync
-    so the window does not invent parallel dicts.
+    so the window does not invent parallel dicts. Animation clips live in
+    their own namespace: a clip may share its name with a transform.
     """
 
     def __init__(
@@ -32,6 +34,7 @@ class SceneWorld:
         meshes: Iterable[MeshComponent] = (),
         lights: Iterable[LightComponent] = (),
         cameras: Iterable[CameraComponent] = (),
+        animations: Iterable[AnimationClip] = (),
     ) -> None:
         """Create a world from optional seed components.
 
@@ -40,6 +43,8 @@ class SceneWorld:
             meshes: Initial mesh shapes.
             lights: Initial light shapes.
             cameras: Initial camera shapes.
+            animations: Initial clips; their channels must name transforms
+                in ``transforms``.
         """
         self._transforms: dict[str, TransformComponent] = {}
         self._meshes: dict[str, MeshComponent] = {}
@@ -51,6 +56,7 @@ class SceneWorld:
         self._meshes_by_transform: dict[str, list[str]] = {}
         self._lights_by_transform: dict[str, list[str]] = {}
         self._cameras_by_transform: dict[str, list[str]] = {}
+        self._animations: dict[str, AnimationClip] = {}
         for item in transforms:
             self.add_transform(item)
         for item in meshes:
@@ -59,6 +65,8 @@ class SceneWorld:
             self.add_light(item)
         for item in cameras:
             self.add_camera(item)
+        for item in animations:
+            self.add_animation(item)
 
     @property
     def transforms(self) -> dict[str, TransformComponent]:
@@ -91,6 +99,80 @@ class SceneWorld:
     def cameras_on(self, transform: str) -> list[str]:
         """Camera UIDs parented under ``transform``."""
         return list(self._cameras_by_transform.get(transform, ()))
+
+    @property
+    def animations(self) -> dict[str, AnimationClip]:
+        """Clip name → clip, in insertion order."""
+        return self._animations
+
+    def get_animation(self, name: str) -> AnimationClip | None:
+        """Return a clip by name, or ``None``."""
+        return self._animations.get(name)
+
+    def unique_clip_name(self, stem: str) -> str:
+        """Return ``stem`` or ``stem_N`` that no clip uses yet.
+
+        Args:
+            stem: Preferred clip name.
+        """
+        return unique_clip_name(stem, self._animations)
+
+    def add_animation(self, clip: AnimationClip) -> None:
+        """Insert a clip.
+
+        Args:
+            clip: Clip to store.
+
+        Raises:
+            KeyError: When a clip of that name exists, or a channel names a
+                transform the world does not have.
+        """
+        if clip.name in self._animations:
+            msg = f"animation already exists: {clip.name!r}"
+            raise KeyError(msg)
+        self._check_targets(clip)
+        self._animations[clip.name] = clip
+
+    def set_animation(self, clip: AnimationClip) -> None:
+        """Replace a stored clip (same name).
+
+        Args:
+            clip: Updated clip.
+
+        Raises:
+            KeyError: When no clip of that name exists, or a channel names
+                a transform the world does not have.
+        """
+        if clip.name not in self._animations:
+            msg = f"animation not found: {clip.name!r}"
+            raise KeyError(msg)
+        self._check_targets(clip)
+        self._animations[clip.name] = clip
+
+    def remove_animation(self, name: str) -> AnimationClip | None:
+        """Remove a clip.
+
+        Args:
+            name: Clip name.
+
+        Returns:
+            The removed clip, or ``None`` when missing.
+        """
+        return self._animations.pop(name, None)
+
+    def animations_targeting(self, transform: str) -> list[str]:
+        """Names of the clips with a channel on ``transform``."""
+        return [
+            clip.name
+            for clip in self._animations.values()
+            if any(channel.transform == transform for channel in clip.channels)
+        ]
+
+    def _check_targets(self, clip: AnimationClip) -> None:
+        missing = sorted(clip.targets() - set(self._transforms))
+        if missing:
+            msg = f"animation {clip.name!r} targets missing transforms: {missing}"
+            raise KeyError(msg)
 
     def used_names(self) -> set[str]:
         """All component UIDs plus outliner folder names."""
@@ -337,7 +419,19 @@ class SceneWorld:
         self._meshes_by_transform.pop(name, None)
         self._lights_by_transform.pop(name, None)
         self._cameras_by_transform.pop(name, None)
+        self._drop_channels(name)
         return self._transforms.pop(name)
+
+    def _drop_channels(self, transform: str) -> None:
+        """Forget the channels on ``transform``; drop clips that empties."""
+        for clip_name, clip in list(self._animations.items()):
+            kept = [c for c in clip.channels if c.transform != transform]
+            if len(kept) == len(clip.channels):
+                continue
+            if kept:
+                self._animations[clip_name] = clip.model_copy(update={"channels": kept})
+            else:
+                del self._animations[clip_name]
 
     def rename_transform(self, old_name: str, new_name: str) -> TransformComponent:
         """Rename a transform and rewrite child parent / shape links.
@@ -388,6 +482,18 @@ class SceneWorld:
             if child.parent == old_name:
                 self._transforms[child_name] = child.model_copy(
                     update={"parent": new_name}
+                )
+        for clip_name, clip in list(self._animations.items()):
+            if any(channel.transform == old_name for channel in clip.channels):
+                self._animations[clip_name] = clip.model_copy(
+                    update={
+                        "channels": [
+                            channel.model_copy(update={"transform": new_name})
+                            if channel.transform == old_name
+                            else channel
+                            for channel in clip.channels
+                        ]
+                    }
                 )
         return updated
 
@@ -446,6 +552,7 @@ class SceneWorld:
         self._meshes_by_transform.clear()
         self._lights_by_transform.clear()
         self._cameras_by_transform.clear()
+        self._animations.clear()
 
     def replace_all(
         self,
@@ -453,14 +560,20 @@ class SceneWorld:
         meshes: Iterable[MeshComponent],
         lights: Iterable[LightComponent],
         cameras: Iterable[CameraComponent] = (),
+        animations: Iterable[AnimationClip] = (),
     ) -> None:
         """Replace the entire world contents.
+
+        Channels that name a transform not in ``transforms`` are dropped,
+        and a clip left without channels with them, so a hand-edited scene
+        file still opens.
 
         Args:
             transforms: New transforms.
             meshes: New meshes.
             lights: New lights.
             cameras: New cameras.
+            animations: New clips.
         """
         self.clear()
         for item in transforms:
@@ -471,6 +584,10 @@ class SceneWorld:
             self.add_light(item)
         for item in cameras:
             self.add_camera(item)
+        for item in animations:
+            pruned = prune_clip(item, self._transforms)
+            if pruned is not None and pruned.name not in self._animations:
+                self.add_animation(pruned)
 
     def to_document(self) -> SceneDocument:
         """Snapshot the world as a serializable document."""
@@ -481,7 +598,14 @@ class SceneWorld:
             meshes=[item.model_copy(deep=True) for item in self._meshes.values()],
             lights=[item.model_copy(deep=True) for item in self._lights.values()],
             cameras=[item.model_copy(deep=True) for item in self._cameras.values()],
+            animations=[
+                item.model_copy(deep=True) for item in self._animations.values()
+            ],
         )
+
+    def iter_animations(self) -> Iterator[AnimationClip]:
+        """Iterate clips in insertion order."""
+        yield from self._animations.values()
 
     def iter_cameras(self) -> Iterator[CameraComponent]:
         """Iterate cameras in insertion order."""
@@ -498,3 +622,39 @@ class SceneWorld:
     def iter_lights(self) -> Iterator[LightComponent]:
         """Iterate lights in insertion order."""
         yield from self._lights.values()
+
+
+def unique_clip_name(stem: str, taken: Iterable[str]) -> str:
+    """Return ``stem`` or ``stem_N`` that is not in ``taken``.
+
+    Args:
+        stem: Preferred clip name.
+        taken: Clip names already in use.
+    """
+    used = set(taken)
+    if stem not in used:
+        return stem
+    index = 1
+    while f"{stem}_{index}" in used:
+        index += 1
+    return f"{stem}_{index}"
+
+
+def prune_clip(clip: AnimationClip, transforms: Iterable[str]) -> AnimationClip | None:
+    """Return ``clip`` without channels on transforms not in ``transforms``.
+
+    Args:
+        clip: Clip to filter.
+        transforms: Transform names that exist.
+
+    Returns:
+        The clip, a copy with fewer channels, or ``None`` when no channel
+        is left.
+    """
+    present = set(transforms)
+    kept = [channel for channel in clip.channels if channel.transform in present]
+    if not kept:
+        return None
+    if len(kept) == len(clip.channels):
+        return clip
+    return clip.model_copy(update={"channels": kept})

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QToolBar,
+    QVBoxLayout,
     QWidget,
 )
 from rendercanvas.qt import QRenderWidget
@@ -36,9 +37,11 @@ from rendercanvas.qt import QRenderWidget
 from mtqt import (
     PropertiesBook,
     SceneGraphTree,
+    TimelineBar,
     apply_stylesheet,
     ensure_application,
 )
+from scene_viewport.animation import AnimationClip
 from scene_viewport.components import (
     CameraComponent,
     CameraKind,
@@ -65,6 +68,7 @@ from scene_viewport.model_import import (
     import_objects,
 )
 from scene_viewport.navigation import NAVIGATION_HINTS
+from scene_viewport.playback import PlaybackController
 from scene_viewport.recent_files import RecentFiles
 from scene_viewport.scene import (
     FOLDER_NAMES,
@@ -83,7 +87,7 @@ from scene_viewport.viewport import (
     ViewPreset,
     attach_viewport,
 )
-from scene_viewport.world import SceneWorld
+from scene_viewport.world import SceneWorld, prune_clip
 from scene_viewport.xform_math import look_at_trs
 
 _log = logging.getLogger(__name__)
@@ -160,6 +164,9 @@ class SceneViewportWindow(QMainWindow):
     Preferences. File → Open takes a scene or a model file (a model opens as
     a new, untitled scene), Open Recent lists both, and New / Open / Quit
     ask before dropping unsaved changes. Ctrl+Z / Ctrl+Y undo and redo.
+    A scene with animation clips shows a timeline bar under the viewport;
+    **Space** plays and pauses. Playback poses the viewport only: the
+    stored transforms stay the rest pose until Stop restores it.
     """
 
     def __init__(
@@ -189,6 +196,7 @@ class SceneViewportWindow(QMainWindow):
         self._pivot_action: QAction | None = None
         self._grid_action: QAction | None = None
         self._look_through_action: QAction | None = None
+        self._play_action: QAction | None = None
         self._nav_label: QLabel | None = None
         self._scene_path: Path | None = None
         self._import_dir: Path | None = None
@@ -225,7 +233,15 @@ class SceneViewportWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
         splitter.setSizes([260, 700, 280])
-        self.setCentralWidget(splitter)
+        central = QWidget(self)
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(splitter, stretch=1)
+        self._timeline = TimelineBar(central)
+        self._timeline.hide()
+        central_layout.addWidget(self._timeline)
+        self.setCentralWidget(central)
         apply_stylesheet(self, "base", "widgets")
 
         self._viewport: ViewportController = attach_viewport(
@@ -238,6 +254,11 @@ class SceneViewportWindow(QMainWindow):
         )
         self._viewport.apply_settings(self._settings)
         self._viewport.set_gizmo_space(self._edit_space)
+        self._playback = PlaybackController(
+            self._world, self._viewport, self._timeline, parent=self
+        )
+        self._playback.stateChanged.connect(self._update_status)
+        self._playback.poseSettled.connect(self._on_pose_settled)
         self._tree.selectedNamesChanged.connect(self._on_tree_selection)
 
         self._props.set_editable_check(self._is_prop_editable)
@@ -464,6 +485,20 @@ class SceneViewportWindow(QMainWindow):
             self._draw_mode_actions[mode] = action
         self._draw_mode_actions["shaded"].setChecked(True)
 
+        animation_menu = self.menuBar().addMenu("&Animation")
+        play_action = QAction("Play / Pause", self)
+        play_action.setShortcut(QKeySequence(Qt.Key.Key_Space))
+        play_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        play_action.setStatusTip("Play or pause the current animation clip")
+        play_action.triggered.connect(self._playback.toggle_play)
+        play_action.setEnabled(False)
+        animation_menu.addAction(play_action)
+        self._play_action = play_action
+        stop_action = QAction("Stop", self)
+        stop_action.setStatusTip("Rewind and restore the rest pose")
+        stop_action.triggered.connect(self._playback.stop)
+        animation_menu.addAction(stop_action)
+
         settings_menu = self.menuBar().addMenu("&Settings")
         prefs = QAction("Preferences...", self)
         prefs.setShortcut(QKeySequence.StandardKey.Preferences)
@@ -593,6 +628,9 @@ class SceneViewportWindow(QMainWindow):
         looking = self._viewport.looking_through
         if looking is not None:
             parts.append(f"Looking through {looking} (Ctrl+Shift+L exits)")
+        playback = self._playback.status_text()
+        if playback is not None:
+            parts.append(playback)
         self._sync_look_through_action()
         self.statusBar().showMessage(" · ".join(parts))
 
@@ -662,6 +700,7 @@ class SceneViewportWindow(QMainWindow):
         )
 
     def _rebuild_tree(self, select: list[str] | None = None) -> None:
+        self._refresh_playback()
         forest = build_forest(
             self._world.iter_transforms(),
             self._world.iter_meshes(),
@@ -681,6 +720,32 @@ class SceneViewportWindow(QMainWindow):
         finally:
             self._syncing = False
         self._sync_properties(select or [])
+
+    def _refresh_playback(self) -> None:
+        """Re-read clips after a scene change and enable the Play action."""
+        self._playback.refresh()
+        if self._play_action is not None:
+            self._play_action.setEnabled(bool(self._world.animations))
+
+    def _on_pose_settled(self) -> None:
+        """Refresh the panel once a pose stops moving, so it shows the viewport."""
+        self._sync_properties(self._viewport.selected_names)
+
+    def _stop_playback_for_edit(self, names: Iterable[str]) -> bool:
+        """Stop playback before an edit that reads animated transforms.
+
+        Edits read the viewport, so a displayed pose would become the new
+        rest pose. Returns ``True`` when playback was stopped.
+        """
+        if not self._playback.stop_for_edit(names):
+            return False
+        self.statusBar().showMessage(
+            "Playback stopped and the rest pose restored before the edit", 4000
+        )
+        return True
+
+    def _register_animation(self, clip: AnimationClip) -> None:
+        self._world.add_animation(clip)
 
     def _register_transform(self, component: TransformComponent) -> None:
         self._world.add_transform(component)
@@ -867,6 +932,14 @@ class SceneViewportWindow(QMainWindow):
         removed_meshes: list[MeshComponent] = []
         removed_lights: list[LightComponent] = []
         removed_cameras: list[CameraComponent] = []
+        clip_names = dict.fromkeys(
+            clip
+            for name in to_remove
+            for clip in self._world.animations_targeting(name)
+        )
+        removed_animations = [
+            self._world.animations[clip].model_copy(deep=True) for clip in clip_names
+        ]
         for name in to_remove:
             for mesh_name in self._world.meshes_on(name):
                 mesh = self._world.meshes.get(mesh_name)
@@ -889,6 +962,7 @@ class SceneViewportWindow(QMainWindow):
                     meshes=removed_meshes,
                     lights=removed_lights,
                     cameras=removed_cameras,
+                    animations=removed_animations,
                 ),
             )
         )
@@ -931,6 +1005,7 @@ class SceneViewportWindow(QMainWindow):
         stored = self._world.transforms.get(name)
         if stored is None or stored.parent == new_parent:
             return False
+        self._stop_playback_for_edit([name])
         snap = self._snapshot_transform(name)
         if snap is None:
             return False
@@ -1077,6 +1152,7 @@ class SceneViewportWindow(QMainWindow):
 
     def _replace_scene(self, document: SceneDocument) -> None:
         """Replace the live scene with ``document`` and clear history."""
+        self._playback.stop()
         for name in list(self._world.transforms):
             self._unregister_transform(name)
         # Report only the files the new scene fails to load.
@@ -1091,6 +1167,10 @@ class SceneViewportWindow(QMainWindow):
             self._register_light(light)
         for camera in document.cameras:
             self._register_camera(camera)
+        for clip in document.animations:
+            pruned = prune_clip(clip, self._world.transforms)
+            if pruned is not None and pruned.name not in self._world.animations:
+                self._register_animation(pruned)
         self._rebuild_tree([])
         self._saved_document = self._world.to_document()
 
@@ -1150,6 +1230,7 @@ class SceneViewportWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._confirm_discard("Quit"):
+            self._playback.stop()
             event.accept()
         else:
             event.ignore()
@@ -1373,6 +1454,7 @@ class SceneViewportWindow(QMainWindow):
                 left in ``_import_problems`` for the caller to report.
         """
         used = self._used_names()
+        clip_names = set(self._world.animations)
         results: list[ImportResult] = []
         failures: list[str] = []
         warnings: list[str] = []
@@ -1395,6 +1477,7 @@ class SceneViewportWindow(QMainWindow):
                     used,
                     space=self._edit_space,
                     conversion=conversion,
+                    clip_names=clip_names,
                 )
             )
             warnings.extend(results[-1].warnings)
@@ -1404,6 +1487,7 @@ class SceneViewportWindow(QMainWindow):
             meshes = [m for result in results for m in result.objects.meshes]
             lights = [light for result in results for light in result.objects.lights]
             cameras = [cam for result in results for cam in result.objects.cameras]
+            clips = [clip for result in results for clip in result.objects.animations]
             for transform in transforms:
                 self._register_transform(transform)
             for mesh in meshes:
@@ -1412,6 +1496,8 @@ class SceneViewportWindow(QMainWindow):
                 self._register_light(light)
             for camera in cameras:
                 self._register_camera(camera)
+            for clip in clips:
+                self._register_animation(clip)
             self._history.push(
                 HistoryStep(
                     label="Import",
@@ -1420,6 +1506,7 @@ class SceneViewportWindow(QMainWindow):
                         meshes=[m.model_copy(deep=True) for m in meshes],
                         lights=[light.model_copy(deep=True) for light in lights],
                         cameras=[cam.model_copy(deep=True) for cam in cameras],
+                        animations=[clip.model_copy(deep=True) for clip in clips],
                     ),
                 )
             )
@@ -1431,8 +1518,8 @@ class SceneViewportWindow(QMainWindow):
             problems.append("Could not import:\n" + "\n".join(failures))
         if warnings:
             problems.append(
-                "Some files these models use could not be loaded; those parts "
-                "show the material color:\n" + "\n".join(warnings)
+                "Some parts of these models were approximated or skipped:\n"
+                + "\n".join(warnings)
             )
         if not report:
             self._import_problems = problems
@@ -1765,6 +1852,14 @@ class SceneViewportWindow(QMainWindow):
             else:
                 self._world.cameras[camera.name] = camera
                 self._viewport.apply_camera(camera)
+        for clip in objects.animations:
+            pruned = prune_clip(clip, self._world.transforms)
+            if pruned is None:
+                continue
+            if pruned.name in self._world.animations:
+                self._world.set_animation(pruned)
+            else:
+                self._world.add_animation(pruned)
 
     def _remove_objects(self, objects: SceneObjects) -> None:
         names = [item.name for item in objects.transforms]
@@ -1825,6 +1920,13 @@ class SceneViewportWindow(QMainWindow):
 
     def _is_prop_editable(self, field_name: str, model: BaseModel) -> bool:
         if isinstance(model, TransformComponent):
+            if (
+                field_name in {"position", "rotation", "scale", "pivot"}
+                and self._playback.pose_displayed
+                and self._playback.affects(model.name)
+            ):
+                # The panel reads the viewport, which shows a pose. Stop first.
+                return False
             return field_name in {
                 "space",
                 "position",
@@ -2050,6 +2152,8 @@ class SceneViewportWindow(QMainWindow):
         if not names:
             return
         if not self._gizmo_dragging:
+            if self._stop_playback_for_edit(names):
+                self._viewport.rebase_drag()
             self._gizmo_before = {
                 name: snap
                 for name in names

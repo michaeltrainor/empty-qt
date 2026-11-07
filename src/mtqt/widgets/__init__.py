@@ -5,6 +5,7 @@ from mtqt.widgets.path_picker import PathPicker
 from mtqt.widgets.properties_book import PropertiesBook
 from mtqt.widgets.properties_panel import PropertiesPanel
 from mtqt.widgets.scene_graph_tree import SceneGraphTree
+from mtqt.widgets.timeline_bar import TimelineBar
 
 __all__ = [
     "DropWidget",
@@ -16,4 +17,5 @@ __all__ = [
     "PropertiesBook",
     "PropertiesPanel",
     "SceneGraphTree",
+    "TimelineBar",
 ]

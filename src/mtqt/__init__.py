@@ -20,6 +20,7 @@ from mtqt.widgets import (
     PropertiesBook,
     PropertiesPanel,
     SceneGraphTree,
+    TimelineBar,
 )
 
 try:
@@ -44,6 +45,7 @@ __all__ = [
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",
+    "TimelineBar",
     "__version__",
     "apply_stylesheet",
     "ensure_application",

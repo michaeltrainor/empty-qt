@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from scene_viewport.animation import AnimationClip
 from scene_viewport.components import (
     CameraComponent,
     LightComponent,
@@ -24,6 +25,7 @@ class SceneDocument(BaseModel):
         meshes: Mesh shapes referencing transform names.
         lights: Light shapes referencing transform names.
         cameras: Camera shapes referencing transform names.
+        animations: Keyframe clips whose channels reference transform names.
     """
 
     version: int = Field(default=1, ge=1)
@@ -31,6 +33,7 @@ class SceneDocument(BaseModel):
     meshes: list[MeshComponent] = Field(default_factory=list)
     lights: list[LightComponent] = Field(default_factory=list)
     cameras: list[CameraComponent] = Field(default_factory=list)
+    animations: list[AnimationClip] = Field(default_factory=list)
 
 
 def load_scene(path: Path) -> SceneDocument:

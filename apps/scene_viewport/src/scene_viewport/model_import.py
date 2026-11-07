@@ -7,10 +7,17 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from scene_viewport.animation import (
+    AnimationChannel,
+    AnimationClip,
+    ChannelPath,
+    Interpolation,
+)
 from scene_viewport.components import (
     CameraComponent,
     LightComponent,
@@ -21,6 +28,7 @@ from scene_viewport.components import (
 from scene_viewport.history import SceneObjects
 from scene_viewport.mesh.importer import ImportedModel, ImportedNode
 from scene_viewport.settings import ImportUnit, ImportUpAxis
+from scene_viewport.world import unique_clip_name
 from scene_viewport.xform_math import mat_from_trs, trs_from_mat
 
 _UNSAFE = re.compile(r"[^0-9A-Za-z_]+")
@@ -38,10 +46,10 @@ class ImportResult:
 
     Args:
         root: Name of the transform that holds the whole file.
-        objects: Every new transform, mesh, and light, parents before
-            children.
+        objects: Every new transform, mesh, light, camera, and animation
+            clip, parents before children.
         warnings: Approximations made while converting, such as a spot
-            light's direction being dropped.
+            light's direction being dropped or animation channels skipped.
     """
 
     root: str
@@ -111,13 +119,15 @@ def import_objects(
     *,
     space: Space = "world",
     conversion: NDArray[np.float64] | None = None,
+    clip_names: set[str] | None = None,
 ) -> ImportResult:
     """Build transforms and meshes for ``model`` under one new root.
 
     The root transform is named after the file. Each node becomes a
     transform under it, keeping the file's hierarchy, and each node with a
     mesh gets a ``file`` mesh shape. A file with a single mesh node and no
-    hierarchy (most OBJ, STL, and PLY files) puts the mesh on the root.
+    hierarchy (most OBJ, STL, and PLY files) puts the mesh on the root,
+    unless the file has lights, cameras, or animations.
 
     Args:
         model: Parsed model file.
@@ -125,6 +135,9 @@ def import_objects(
         space: Edit space for the new transforms.
         conversion: Matrix applied to the root, such as from
             :func:`import_conversion`. ``None`` keeps the file's coordinates.
+        clip_names: Animation clip names already taken; new clip names are
+            added to it. Clips have their own namespace, separate from
+            ``used``. ``None`` only avoids clashes within this file.
 
     Returns:
         The root name and the new components.
@@ -147,7 +160,12 @@ def import_objects(
     meshes: list[MeshComponent] = []
 
     single = _single_mesh_node(model)
-    if single is not None and not model.lights and not model.cameras:
+    if (
+        single is not None
+        and not model.lights
+        and not model.cameras
+        and not model.animations
+    ):
         position, rotation, scale = trs_from_mat(convert @ single.matrix)
         transforms.append(
             TransformComponent(
@@ -193,13 +211,80 @@ def import_objects(
             meshes.append(_mesh(model, node, name, claim))
     lights, warnings = _lights(model, names, transforms, world_matrices, claim)
     cameras = _cameras(model, names, transforms, root, space, claim)
+    # After the cameras, so a channel on a rebuilt camera node finds it.
+    animations, animation_warnings = _animations(
+        model, names, set() if clip_names is None else clip_names
+    )
+    warnings.extend(animation_warnings)
     return ImportResult(
         root,
         SceneObjects(
-            transforms=transforms, meshes=meshes, lights=lights, cameras=cameras
+            transforms=transforms,
+            meshes=meshes,
+            lights=lights,
+            cameras=cameras,
+            animations=animations,
         ),
         warnings=tuple(warnings),
     )
+
+
+#: Decimal places kept for keyframe values in the scene file. glTF stores
+#: float32, which has about seven significant digits.
+_KEY_DECIMALS = 7
+
+
+def _animations(
+    model: ImportedModel,
+    names: dict[str, str],
+    clip_names: set[str],
+) -> tuple[list[AnimationClip], list[str]]:
+    """Turn the file's animations into clips on the new transforms.
+
+    Each channel's node name is translated through ``names``, the file
+    node → transform name map built while creating the transforms, so a
+    clip follows the renames ``claim`` made. Channels on nodes that were
+    not imported are dropped. Skipped channels of any kind give one
+    warning per clip. A clip with nothing left to play is dropped.
+    """
+    clips: list[AnimationClip] = []
+    warnings: list[str] = []
+    for animation in model.animations:
+        channels: list[AnimationChannel] = []
+        dropped: list[str] = []
+        for channel in animation.channels:
+            target = names.get(channel.node)
+            if target is None:
+                dropped.append(channel.node)
+                continue
+            channels.append(
+                AnimationChannel(
+                    transform=target,
+                    path=cast(ChannelPath, channel.path),
+                    interpolation=cast(Interpolation, channel.interpolation),
+                    times=np.asarray(channel.times, dtype=np.float64).tolist(),
+                    values=np.round(
+                        np.asarray(channel.values, dtype=np.float64), _KEY_DECIMALS
+                    ).tolist(),
+                )
+            )
+        skipped = list(animation.skipped)
+        if dropped:
+            nodes = ", ".join(dict.fromkeys(dropped))
+            skipped.append(f"channels on nodes that were not imported ({nodes})")
+        if not channels and not skipped:
+            skipped.append("every channel; it has nothing to play")
+        if skipped:
+            warnings.append(
+                f"{model.path.name}: animation {animation.name!r} skips "
+                + "; ".join(skipped)
+            )
+        if not channels:
+            continue
+        name = unique_clip_name(animation.name, clip_names)
+        clip_names.add(name)
+        clips.append(AnimationClip(name=name, channels=channels))
+    return clips, warnings
 
 
 def _cameras(

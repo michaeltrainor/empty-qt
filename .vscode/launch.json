@@ -74,6 +74,18 @@
       }
     },
     {
+      "name": "TimelineBar",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/timeline_bar.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "NodeGraph",
       "type": "debugpy",
       "request": "launch",
