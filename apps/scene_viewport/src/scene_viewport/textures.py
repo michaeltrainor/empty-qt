@@ -9,7 +9,7 @@ import pygfx as gfx
 from numpy.typing import NDArray
 from PySide6.QtGui import QImage
 
-from scene_viewport.mesh.importer import ModelImportError, load_model
+from scene_viewport.mesh.importer import ImportedMaps, ModelImportError, load_model
 
 
 def load_albedo_texture(path: Path) -> gfx.Texture | None:
@@ -51,34 +51,41 @@ def load_albedo_texture(path: Path) -> gfx.Texture | None:
     return texture_from_rgba(pixels)
 
 
-def texture_from_rgba(pixels: NDArray[np.uint8]) -> gfx.Texture:
+def texture_from_rgba(
+    pixels: NDArray[np.uint8],
+    *,
+    color: bool = True,
+) -> gfx.Texture:
     """Wrap an RGBA image, top row first, as a ``gfx.Texture``.
 
     Args:
         pixels: ``(height, width, 4)`` ``uint8`` image as files store it.
+        color: ``True`` for color data (sRGB); ``False`` for data maps such
+            as normals or roughness, which are linear.
 
     Returns:
-        A 2D sRGB texture for a ``TextureMap``.
+        A 2D texture for a ``TextureMap``.
     """
     # pygfx UV origin is bottom-left; image rows run top to bottom.
-    return gfx.Texture(np.ascontiguousarray(np.flipud(pixels)), dim=2)
+    return gfx.Texture(
+        np.ascontiguousarray(np.flipud(pixels)),
+        dim=2,
+        colorspace="srgb" if color else "physical",
+    )
 
 
-def file_texture(source: Path, mesh: str) -> gfx.Texture | None:
-    """Return the base color texture of mesh ``mesh`` in model file ``source``.
+def file_maps(source: Path, mesh: str) -> ImportedMaps | None:
+    """Return the texture images of mesh ``mesh`` in model file ``source``.
 
     Args:
         source: Model file, as stored on a ``file`` mesh.
         mesh: Mesh key inside the file.
 
     Returns:
-        A texture, or ``None`` when the file can't be read or the mesh has
-        no texture.
+        The mesh's images, or ``None`` when the file can't be read or the
+        mesh has none.
     """
     try:
-        pixels = load_model(source).textures.get(mesh)
+        return load_model(source).maps.get(mesh)
     except ModelImportError:
         return None
-    if pixels is None:
-        return None
-    return texture_from_rgba(pixels)

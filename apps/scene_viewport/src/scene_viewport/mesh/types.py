@@ -21,9 +21,13 @@ class MeshBuffers:
         normals: Per-vertex normals, shape ``(N, 3)``.
         indices: Triangle indices, shape ``(T, 3)``.
         texcoords: UV coordinates, shape ``(N, 2)``.
+        tangents: Optional ``(N, 4)`` tangents for normal mapping: the
+            direction of +U, and in ``w`` the sign that gives the bitangent
+            as ``cross(normal, tangent) * w``.
     """
 
     positions: NDArray[np.float32]
     normals: NDArray[np.float32]
     indices: NDArray[np.uint32]
     texcoords: NDArray[np.float32]
+    tangents: NDArray[np.float32] | None = None

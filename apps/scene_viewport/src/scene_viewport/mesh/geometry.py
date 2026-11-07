@@ -13,12 +13,17 @@ from scene_viewport.mesh.types import MeshBuffers, PrimitiveKind
 
 def to_geometry(buffers: MeshBuffers) -> gfx.Geometry:
     """Build a pygfx ``Geometry`` from ``MeshBuffers``."""
-    return gfx.Geometry(
+    geometry = gfx.Geometry(
         positions=buffers.positions,
         normals=buffers.normals,
         indices=buffers.indices,
         texcoords=buffers.texcoords,
     )
+    if buffers.tangents is not None:
+        # With tangents pygfx normal-maps in a fixed frame; without them it
+        # derives one from the view, which collapses in orthographic views.
+        geometry.tangents = gfx.Buffer(buffers.tangents)
+    return geometry
 
 
 def geometry_for(kind: PrimitiveKind) -> gfx.Geometry:
