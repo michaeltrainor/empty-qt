@@ -12,6 +12,10 @@ LightKind = Literal["directional", "point", "spot"]
 PrimitiveKind = Literal["box", "plane", "sphere"]
 #: Built-in primitives, or ``file`` for a mesh read from a model file.
 MeshKind = Literal["box", "plane", "sphere", "file"]
+#: How a mesh's alpha is used: ignored, cut at ``alpha_cutoff``, or blended.
+AlphaMode = Literal["opaque", "mask", "blend"]
+#: Texture images an imported mesh can carry (fields of ``ImportedMaps``).
+MapKind = Literal["base_color", "metallic_roughness", "normal", "emissive", "occlusion"]
 
 
 class TransformComponent(BaseModel):
@@ -113,6 +117,38 @@ class MeshComponent(BaseModel):
             "Optional color texture path. Empty uses the model file's texture "
             "(imported meshes) or Color. Mode 6 shows it."
         ),
+    )
+    opacity: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        title="Opacity",
+        description="Multiplies the color alpha. Below 1 needs Alpha Mode blend.",
+    )
+    alpha_mode: AlphaMode = Field(
+        default="opaque",
+        title="Alpha Mode",
+        description=(
+            "opaque ignores alpha; mask discards pixels below Alpha Cutoff "
+            "(foliage, fences); blend composites (glass, decals)."
+        ),
+    )
+    alpha_cutoff: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        title="Alpha Cutoff",
+        description="Alpha below this is discarded in mask mode.",
+    )
+    double_sided: bool = Field(
+        default=True,
+        title="Double Sided",
+        description="Draw back faces too. glTF files set this per material.",
+    )
+    unlit: bool = Field(
+        default=False,
+        title="Unlit",
+        description="Show the color and texture without lighting or shadows.",
     )
     cast_shadow: bool = Field(default=True, title="Cast Shadow")
     receive_shadow: bool = Field(default=True, title="Receive Shadow")

@@ -64,6 +64,8 @@ def _host() -> SimpleNamespace:
     host = SimpleNamespace(_albedo_cache={}, _albedo_stamps={})
     host._file_texture = functools.partial(ViewportController._file_texture, host)
     host._file_maps = functools.partial(ViewportController._file_maps, host)
+    host._texture_map = ViewportController._texture_map
+    host._surface_kwargs = ViewportController._surface_kwargs
     return host
 
 
@@ -423,3 +425,166 @@ def test_mtl_map_file_names_after_unknown_options(
     obj.write_text("mtllib m.mtl\nv 0 0 0\n", encoding="utf-8")
     names = [f.name for f in referenced_files(obj)][1:]
     assert names == ([expected] if expected else [])
+
+
+def _gltf_files(folder: Path, material: object) -> Path:
+    """Export a textured quad as .gltf + .bin and return the .gltf path."""
+    files = trimesh.Scene(_quad(material)).export(file_type="gltf")
+    gltf = folder / "quad.gltf"
+    for name, payload in files.items():
+        target = gltf if name.endswith(".gltf") else folder / name
+        target.write_bytes(payload)
+    return gltf
+
+
+def _edit_gltf(gltf: Path, edit) -> None:
+    document = json.loads(gltf.read_text(encoding="utf-8"))
+    edit(document)
+    gltf.write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_alpha_sides_and_occlusion_are_read_from_the_material(tmp_path: Path) -> None:
+    material = PBRMaterial(
+        baseColorFactor=[255, 255, 255, 128],
+        baseColorTexture=_quadrants(),
+        occlusionTexture=_quadrants(),
+        alphaMode="MASK",
+        alphaCutoff=0.3,
+        doubleSided=True,
+    )
+    path = _glb(tmp_path / "masked.glb", material)
+    model = load_model(path)
+    key = model.nodes[0].mesh
+    imported = model.materials[key]
+    assert imported is not None
+    assert imported.alpha_mode == "mask"
+    assert imported.alpha_cutoff == 0.3
+    assert imported.double_sided is True
+    assert not imported.unlit
+    assert abs(imported.opacity - 128 / 255) < 1e-6
+    maps = model.maps[key]
+    assert maps.occlusion is not None
+    assert maps.occlusion_strength == 1.0
+    assert maps.transforms == {}
+
+    # Plain materials stay opaque and single sided, as glTF defaults them.
+    plain = load_model(_glb(tmp_path / "plain.glb", PBRMaterial()))
+    imported = plain.materials[plain.nodes[0].mesh]
+    assert imported is not None
+    assert (imported.alpha_mode, imported.double_sided, imported.opacity) == (
+        "opaque",
+        False,
+        1.0,
+    )
+
+
+def test_unlit_transform_and_second_uv_set_come_from_the_json(tmp_path: Path) -> None:
+    material = PBRMaterial(baseColorTexture=_quadrants(), occlusionTexture=_quadrants())
+    gltf = _gltf_files(tmp_path, material)
+
+    def edit(document: dict) -> None:
+        mat = document["materials"][0]
+        mat["extensions"] = {"KHR_materials_unlit": {}}
+        mat["pbrMetallicRoughness"]["baseColorTexture"]["extensions"] = {
+            "KHR_texture_transform": {"offset": [0.5, 0.0], "scale": [2.0, 1.0]}
+        }
+        mat["occlusionTexture"]["texCoord"] = 1
+
+    _edit_gltf(gltf, edit)
+    model = load_model(gltf)
+    key = model.nodes[0].mesh
+    imported = model.materials[key]
+    assert imported is not None
+    assert imported.unlit
+    maps = model.maps[key]
+    assert maps.base_color is not None
+    assert maps.transforms["base_color"].offset == (0.5, 0.0)
+    assert maps.transforms["base_color"].scale == (2.0, 1.0)
+    # The occlusion map samples UV set 1, which trimesh never reads.
+    assert maps.occlusion is None
+    assert any("occlusion map uses UV set 1" in w for w in model.warnings)
+
+
+def test_percent_encoded_image_uris_load(tmp_path: Path) -> None:
+    gltf = _gltf_files(tmp_path, PBRMaterial(baseColorTexture=_quadrants()))
+    _quadrants().save(tmp_path / "paint new.png")
+
+    def edit(document: dict) -> None:
+        # Point the image at a file whose name needs percent-escaping.
+        document["images"][0] = {"uri": "paint%20new.png"}
+
+    _edit_gltf(gltf, edit)
+    model = load_model(gltf)
+    assert model.maps[model.nodes[0].mesh].base_color is not None
+    assert model.warnings == ()
+
+
+def test_import_objects_copies_surface_fields(tmp_path: Path) -> None:
+    from scene_viewport.model_import import import_objects
+
+    material = PBRMaterial(
+        baseColorFactor=[1.0, 1.0, 1.0, 0.5], alphaMode="BLEND", doubleSided=True
+    )
+    model = load_model(_glb(tmp_path / "glass.glb", material))
+    mesh = import_objects(model, set()).objects.meshes[0]
+    assert mesh.alpha_mode == "blend"
+    assert abs(mesh.opacity - 128 / 255) < 1e-6  # trimesh stores 8-bit factors
+    assert mesh.double_sided is True
+    assert not mesh.unlit
+
+
+def test_surface_kwargs_and_texture_map_transform() -> None:
+    kwargs = ViewportController._surface_kwargs
+    base = MeshComponent(name="s", transform="t", kind="box")
+    assert kwargs(base) == {
+        "side": "both",
+        "opacity": 1.0,
+        "alpha_mode": "solid",
+        "alpha_test": 0.0,
+    }
+    masked = base.model_copy(update={"alpha_mode": "mask", "alpha_cutoff": 0.3})
+    assert kwargs(masked)["alpha_test"] == 0.3
+    assert kwargs(masked)["alpha_mode"] == "solid"
+    glass = base.model_copy(
+        update={"alpha_mode": "blend", "opacity": 0.4, "double_sided": False}
+    )
+    assert kwargs(glass) == {
+        "side": "front",
+        "opacity": 0.4,
+        "alpha_mode": "blend",
+        "alpha_test": 0.0,
+    }
+    # The kwargs build real materials, lit and unlit.
+    standard = pygfx.MeshStandardMaterial(**kwargs(masked))
+    assert standard.alpha_test == 0.3
+    assert pygfx.MeshBasicMaterial(**kwargs(glass)).side == "front"
+
+    from scene_viewport.mesh.gltf_extras import TextureTransform
+    from scene_viewport.mesh.importer import ImportedMaps
+
+    texture = texture_from_rgba(np.zeros((2, 2, 4), dtype=np.uint8))
+    maps = ImportedMaps(
+        base_color=np.zeros((2, 2, 4), dtype=np.uint8),
+        transforms={
+            "base_color": TextureTransform(offset=(0.5, 0.0), scale=(2.0, 2.0))
+        },
+    )
+    moved = ViewportController._texture_map(texture, "base_color", maps)
+    assert tuple(moved.offset) == (0.5, 0.0)
+    assert tuple(moved.scale) == (2.0, 2.0)
+    plain = ViewportController._texture_map(texture, "normal", maps)
+    assert tuple(plain.offset) == (0.0, 0.0)
+
+
+def test_occlusion_map_goes_on_the_material(tmp_path: Path) -> None:
+    material = PBRMaterial(baseColorTexture=_quadrants(), occlusionTexture=_quadrants())
+    path = _glb(tmp_path / "ao.glb", material)
+    key = load_model(path).nodes[0].mesh
+    component = MeshComponent(
+        name="quadShape", transform="quad", kind="file", source=path, source_mesh=key
+    )
+    target = pygfx.MeshStandardMaterial()
+    ViewportController._apply_file_maps(_host(), target, component, _maps(component))  # type: ignore[arg-type]
+    assert target.ao_map is not None
+    assert target.ao_map.texture.colorspace == "physical"
+    assert target.ao_map_intensity == 1.0

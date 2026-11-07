@@ -210,5 +210,10 @@ def _mesh(
             "color": material.color,
             "roughness": material.roughness,
             "metalness": material.metalness,
+            "opacity": material.opacity,
+            "alpha_mode": material.alpha_mode,
+            "alpha_cutoff": material.alpha_cutoff,
+            "double_sided": material.double_sided,
+            "unlit": material.unlit,
         }
     )
