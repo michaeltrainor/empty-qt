@@ -79,17 +79,26 @@ def import_conversion(
     path: Path,
     up_axis: ImportUpAxis = "auto",
     unit: ImportUnit = "auto",
+    *,
+    declared_up: str | None = None,
+    declared_metres: float | None = None,
 ) -> NDArray[np.float64]:
     """Return the matrix that brings a file's coordinates into the scene.
 
     The scene is Y-up in metres. A Z-up file is turned -90 degrees about X,
     so its +Z becomes +Y, and its units are scaled to metres. glTF files
-    are already Y-up metres and get the identity.
+    are already Y-up metres and get the identity. A file that declares
+    its up axis and units (a USD stage) is converted by them when the
+    settings say ``auto``.
 
     Args:
-        path: Model file; its suffix picks the ``auto`` up axis.
+        path: Model file; its suffix picks the ``auto`` up axis when the
+            file declares none.
         up_axis: ``auto`` (Z for STL and PLY, Y for OBJ), ``y``, or ``z``.
-        unit: Units the file was authored in, or ``auto`` to keep numbers.
+        unit: Units the file was authored in, or ``auto`` to keep numbers
+            (or use the declared units).
+        declared_up: ``y`` or ``z`` from the file, or ``None``.
+        declared_metres: Metres per unit from the file, or ``None``.
 
     Returns:
         A 4x4 rotation and uniform scale.
@@ -97,9 +106,17 @@ def import_conversion(
     suffix = path.suffix.lower()
     if suffix in _GLTF_SUFFIXES:
         return np.eye(4)
-    scale = _METRES[unit]
+    if unit == "auto" and declared_metres is not None and declared_metres > 0.0:
+        scale = declared_metres
+    else:
+        scale = _METRES[unit]
     matrix = np.diag([scale, scale, scale, 1.0])
-    z_up = up_axis == "z" or (up_axis == "auto" and suffix in _Z_UP_SUFFIXES)
+    if up_axis != "auto":
+        z_up = up_axis == "z"
+    elif declared_up is not None:
+        z_up = declared_up == "z"
+    else:
+        z_up = suffix in _Z_UP_SUFFIXES
     if z_up:
         to_y_up = np.array(
             [
@@ -174,6 +191,7 @@ def import_objects(
                 position=position,
                 rotation=rotation,
                 scale=scale,
+                visible=single.visible,
             )
         )
         meshes.append(_mesh(model, single, root, claim))
@@ -205,6 +223,7 @@ def import_objects(
                 position=position,
                 rotation=rotation,
                 scale=scale,
+                visible=node.visible,
             )
         )
         if node.mesh:

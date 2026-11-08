@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Scene viewport: OpenUSD files open and import as models. `.usd`,
+  `.usda`, `.usdc`, and `.usdz` stages from other tools (for example the
+  UsdSkel examples) are read like glTF: their `Mesh` prims (polygons
+  triangulated, holes and orientation honoured, face-varying UVs),
+  `UsdPreviewSurface` materials with their textures (base color, normal,
+  emissive, occlusion, roughness and metallic), `displayColor`, lights,
+  cameras, and visibility come through, and the stage's up axis and
+  units convert the model when Import Up Axis / Units are Auto. Opening
+  such a file starts a new untitled scene, so Save never overwrites it;
+  scenes this app saved still open in place. Skinning and blend shapes
+  are not applied yet (rest pose, with a warning), and subdivision
+  surfaces are drawn as their control mesh.
+- Scene viewport: large scenes open much faster. The Pixar Kitchen set
+  (1788 meshes) opens in about 15 s instead of two minutes: model files
+  are stamped for changes once per second instead of once per mesh, a
+  mesh from a USD file is referenced on the live stage instead of having
+  its triangles copied, prim path checks no longer scan every prim, and
+  selection outlines, wire overlays, and bounding boxes are built the
+  first time a mesh needs them instead of three per mesh up front.
+- Scene viewport: the scene store is now backed by a live OpenUSD stage.
+  Every edit (create, delete, move, rename, reparent, reorder, Mesh tab,
+  Light tab, Camera tab, clips) authors the matching prim on an in-memory
+  `Usd.Stage` through the same mapping the USD files use, so the stage
+  always mirrors what the outliner shows. Clips are muted sublayers. No
+  visible change yet; this is the ground for a viewport that draws from
+  the stage. Opening a scene takes slightly longer for imported meshes,
+  whose triangles are embedded in the stage.
 - Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
   `.usd`) next to JSON. Transforms, primitives, imported meshes (with
   their triangles embedded for other tools), Mesh tab materials as

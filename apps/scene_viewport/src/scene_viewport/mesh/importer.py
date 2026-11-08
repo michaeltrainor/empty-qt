@@ -1,4 +1,8 @@
-"""Load model files (glTF, OBJ, STL, PLY) into mesh buffers and a node tree."""
+"""Load model files (glTF, OBJ, STL, PLY, USD) into mesh buffers and a node tree.
+
+trimesh reads the first four; USD stages go through
+:mod:`scene_viewport.mesh.usd_reader`.
+"""
 
 from __future__ import annotations
 
@@ -36,11 +40,22 @@ from scene_viewport.mesh.references import (
     source_signature,
 )
 from scene_viewport.mesh.types import AlphaMode, MapKind, MeshBuffers
+from scene_viewport.mesh.usd_reader import is_usd_model, read_usd_model
 
 _log = logging.getLogger(__name__)
 
 #: File suffixes :func:`load_model` reads, lower case.
-IMPORT_SUFFIXES = (".glb", ".gltf", ".obj", ".stl", ".ply")
+IMPORT_SUFFIXES = (
+    ".glb",
+    ".gltf",
+    ".obj",
+    ".stl",
+    ".ply",
+    ".usd",
+    ".usda",
+    ".usdc",
+    ".usdz",
+)
 
 #: Parsed files kept in memory, so a scene that uses one file many times (or
 #: a reload of the same scene) reads it once.
@@ -198,12 +213,14 @@ class ImportedNode:
         parent: Parent node name, or ``""`` for a top-level node.
         matrix: 4x4 transform relative to the parent.
         mesh: Key into :attr:`ImportedModel.meshes`, or ``""`` for an empty.
+        visible: Whether the node is shown (USD ``visibility``).
     """
 
     name: str
     parent: str
     matrix: NDArray[np.float64]
     mesh: str
+    visible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +240,10 @@ class ImportedModel:
         lights: ``KHR_lights_punctual`` lights, each naming its node.
         cameras: glTF cameras, each naming its node.
         animations: glTF animations, each channel naming its node.
+        up_axis: ``y`` or ``z`` when the file declares its up axis (USD
+            ``upAxis``), else ``None``.
+        meters_per_unit: Scene units in metres when the file declares them
+            (USD ``metersPerUnit``), else ``None``.
     """
 
     path: Path
@@ -234,6 +255,8 @@ class ImportedModel:
     lights: tuple[ImportedLight, ...] = ()
     cameras: tuple[ImportedCamera, ...] = ()
     animations: tuple[ImportedAnimation, ...] = ()
+    up_axis: str | None = None
+    meters_per_unit: float | None = None
 
 
 def is_importable(path: Path) -> bool:
@@ -243,7 +266,8 @@ def is_importable(path: Path) -> bool:
         path: Candidate file path.
 
     Returns:
-        ``True`` for ``.glb``, ``.gltf``, ``.obj``, ``.stl``, and ``.ply``.
+        ``True`` for ``.glb``, ``.gltf``, ``.obj``, ``.stl``, ``.ply``, and
+        the USD suffixes ``.usd``, ``.usda``, ``.usdc``, and ``.usdz``.
     """
     return path.suffix.lower() in IMPORT_SUFFIXES
 
@@ -306,7 +330,9 @@ def _load_cached(path: Path, _signature: tuple[FileStamp, ...]) -> ImportedModel
 
 
 def _parse(path: Path) -> ImportedModel:
-    """Read ``path`` with trimesh and convert its meshes and hierarchy."""
+    """Read ``path``: a USD stage through its reader, the rest with trimesh."""
+    if is_usd_model(path):
+        return _parse_usd(path)
     try:
         # process=False keeps the authored vertices: merging them would
         # smooth hard edges in files that ship split normals.
@@ -379,6 +405,21 @@ def _parse(path: Path) -> ImportedModel:
         lights=tuple(read_lights(document)) if document is not None else (),
         cameras=tuple(read_cameras(document)) if document is not None else (),
         animations=tuple(read_animations(document)) if document is not None else (),
+    )
+
+
+def _parse_usd(path: Path) -> ImportedModel:
+    """Read a USD stage, reporting missing textures like the other formats."""
+    try:
+        model = read_usd_model(path)
+    except ValueError as exc:
+        msg = f"cannot read {path.name}: {exc}"
+        raise ModelImportError(msg) from exc
+    if not model.meshes:
+        msg = f"{path.name} has no triangle meshes"
+        raise ModelImportError(msg)
+    return dataclasses.replace(
+        model, warnings=(*reference_problems(path), *model.warnings)
     )
 
 

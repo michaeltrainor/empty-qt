@@ -86,6 +86,7 @@ from scene_viewport.scene_io import (
 )
 from scene_viewport.settings import AppSettings, load_settings, save_settings
 from scene_viewport.settings_dialog import SettingsDialog
+from scene_viewport.usd_io import is_mtqt_stage, is_usd_file
 from scene_viewport.viewport import (
     DRAW_MODE_HOTKEYS,
     DrawMode,
@@ -1243,7 +1244,9 @@ class SceneViewportWindow(QMainWindow):
 
     def _open_dialog(self) -> None:
         """Pick a scene or model file to open as the current scene."""
-        models = " ".join(f"*{suffix}" for suffix in IMPORT_SUFFIXES)
+        models = " ".join(
+            f"*{suffix}" for suffix in IMPORT_SUFFIXES if suffix not in SCENE_SUFFIXES
+        )
         scenes = " ".join(f"*{suffix}" for suffix in SCENE_SUFFIXES)
         start = self._scene_path or self._import_dir or Path.home()
         path_str, _filter = QFileDialog.getOpenFileName(
@@ -1264,6 +1267,9 @@ class SceneViewportWindow(QMainWindow):
         current scene. A model file (see
         :data:`IMPORT_SUFFIXES`) starts from the default scene, imports the
         model, and leaves the scene untitled, so Save asks where to put it.
+        A USD stage another tool wrote (see
+        :func:`~scene_viewport.usd_io.is_mtqt_stage`) is a model, so its
+        meshes are read and Save never overwrites it.
         Unsaved changes prompt first.
 
         Args:
@@ -1274,7 +1280,7 @@ class SceneViewportWindow(QMainWindow):
         """
         if not self._confirm_discard("Open"):
             return False
-        if is_scene_file(path):
+        if is_scene_file(path) and not _is_foreign_stage(path):
             try:
                 document = load_scene(path)
             except (OSError, ValueError) as exc:
@@ -1478,6 +1484,8 @@ class SceneViewportWindow(QMainWindow):
                 path,
                 self._settings.import_up_axis,
                 self._settings.import_unit,
+                declared_up=model.up_axis,
+                declared_metres=model.meters_per_unit,
             )
             results.append(
                 import_objects(
@@ -2228,6 +2236,11 @@ def dropped_models(mime: QMimeData | None) -> list[Path]:
         Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()
     )
     return importable_paths(local)
+
+
+def _is_foreign_stage(path: Path) -> bool:
+    """Whether ``path`` is a USD file this app did not write: opened as a model."""
+    return is_usd_file(path) and path.is_file() and not is_mtqt_stage(path)
 
 
 def startup_paths(argv: Sequence[str]) -> list[Path]:
