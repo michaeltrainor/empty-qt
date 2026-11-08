@@ -54,6 +54,7 @@ from scene_viewport.components import (
     TransformComponent,
 )
 from scene_viewport.mesh.importer import ModelImportError, load_model
+from scene_viewport.mesh.usd_reader import is_usd_model, linear_to_hex
 from scene_viewport.xform_math import trs_from_mat
 
 _log = logging.getLogger(__name__)
@@ -160,15 +161,6 @@ def _srgb_to_linear(hex_color: str) -> Gf.Vec3f:
     return Gf.Vec3f(
         *(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
     )
-
-
-def _linear_to_hex(color: object) -> str:
-    out = []
-    for c in cast(Iterable[float], color):
-        c = max(0.0, min(1.0, float(c)))
-        s = c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1.0 / 2.4) - 0.055
-        out.append(f"{round(s * 255):02x}")
-    return "#" + "".join(out)
 
 
 def _custom(prim: Usd.Prim, values: Mapping[str, object]) -> None:
@@ -331,12 +323,24 @@ def define_mesh(
         plane.GetWidthAttr().Set(1.0)
         plane.GetLengthAttr().Set(1.0)
     else:
-        gprim = UsdGeom.Mesh.Define(stage, path)
-        _write_mesh_data(UsdGeom.Mesh(gprim), mesh)
         source = mesh.source
         if layer_dir is not None:
             with contextlib.suppress(ValueError):
                 source = source.resolve().relative_to(layer_dir.resolve(), walk_up=True)
+        if is_usd_model(mesh.source):
+            # A USD source prim is referenced, not copied: composition brings
+            # its geometry, subsets, and materials in at no cost. Our own
+            # opinions (type stays the source's, placement comes from the
+            # parent transform) sit above it.
+            prim = stage.DefinePrim(path)
+            prim.GetReferences().SetReferences(
+                [Sdf.Reference(source.as_posix(), Sdf.Path(mesh.source_mesh))]
+            )
+            UsdGeom.Xformable(prim).SetXformOpOrder([])
+            gprim = UsdGeom.Gprim(prim)
+        else:
+            gprim = UsdGeom.Mesh.Define(stage, path)
+            _write_mesh_data(UsdGeom.Mesh(gprim), mesh)
         prim = gprim.GetPrim()
         prim.CreateAttribute(f"{NS}:source", Sdf.ValueTypeNames.Asset).Set(
             Sdf.AssetPath(source.as_posix())
@@ -469,7 +473,7 @@ def read_mesh(
     color = _custom_get(prim, "color")
     if color is None:
         diffuse = inputs.get("diffuseColor")
-        color = _linear_to_hex(diffuse) if diffuse is not None else "#8899aa"
+        color = linear_to_hex(diffuse) if diffuse is not None else "#8899aa"
     alpha_mode = str(_custom_get(prim, "alphaMode", ""))
     if alpha_mode not in ("opaque", "mask", "blend"):
         alpha_mode = "mask" if "opacityThreshold" in inputs else "opaque"
@@ -586,7 +590,7 @@ def read_light(prim: Usd.Prim, name: str, parent: str) -> LightComponent:
             kind = "point"
     color = _custom_get(prim, "color")
     if color is None:
-        color = _linear_to_hex(lux.GetColorAttr().Get() or Gf.Vec3f(1.0, 1.0, 1.0))
+        color = linear_to_hex(lux.GetColorAttr().Get() or Gf.Vec3f(1.0, 1.0, 1.0))
     shadow = UsdLux.ShadowAPI(prim).GetShadowEnableAttr()
     cast_shadow = shadow.Get() if shadow else True
     authored = lux.GetIntensityAttr().Get()

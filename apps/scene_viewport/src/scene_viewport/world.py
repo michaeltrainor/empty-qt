@@ -50,6 +50,42 @@ from scene_viewport.usd_prims import (
 )
 
 
+class _PathTable(dict[str, Sdf.Path]):
+    """Component name → prim path, with constant-time ``has_path``.
+
+    Sibling-path checks run once per prim added, so a linear scan of the
+    values made opening a few thousand prims quadratic.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._paths: set[Sdf.Path] = set()
+
+    def __setitem__(self, name: str, path: Sdf.Path) -> None:
+        old = self.get(name)
+        if old is not None:
+            self._paths.discard(old)
+        super().__setitem__(name, path)
+        self._paths.add(path)
+
+    def __delitem__(self, name: str) -> None:
+        self._paths.discard(self[name])
+        super().__delitem__(name)
+
+    def pop(self, name: str, *default: Sdf.Path) -> Sdf.Path:  # type: ignore[override]
+        path = super().pop(name, *default)
+        self._paths.discard(path)
+        return path
+
+    def clear(self) -> None:
+        super().clear()
+        self._paths.clear()
+
+    def has_path(self, path: Sdf.Path) -> bool:
+        """Whether ``path`` is the prim path of any component."""
+        return path in self._paths
+
+
 class _Table[T: Any](MutableMapping[str, T]):
     """A live, ordered view of one component table.
 
@@ -142,7 +178,7 @@ class SceneWorld:
         self._lights_by_transform: dict[str, list[str]] = {}
         self._cameras_by_transform: dict[str, list[str]] = {}
         # Component name → prim path, for transforms and shapes alike.
-        self._paths: dict[str, Sdf.Path] = {}
+        self._paths = _PathTable()
         self._clip_layers: dict[str, Sdf.Layer] = {}
         self._transform_table = _Table(
             self._transforms,
@@ -200,7 +236,7 @@ class SceneWorld:
         return self._clip_layers.get(name)
 
     def _is_taken(self, path: Sdf.Path) -> bool:
-        return path in self._paths.values() or self._stage.GetPrimAtPath(path).IsValid()
+        return self._paths.has_path(path) or self._stage.GetPrimAtPath(path).IsValid()
 
     def _parent_path(self, parent: str) -> Sdf.Path:
         return self._paths.get(parent, ROOT) if parent else ROOT

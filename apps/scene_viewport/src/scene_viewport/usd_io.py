@@ -47,6 +47,8 @@ _log = logging.getLogger(__name__)
 
 #: File suffixes :func:`save_usd_scene` writes and :func:`load_usd_scene` reads.
 USD_SUFFIXES = (".usda", ".usdc", ".usd")
+#: Root layer ``customLayerData`` key that marks a stage this app wrote.
+LAYER_MARKER = "mtqt:version"
 
 
 def is_usd_file(path: Path) -> bool:
@@ -56,6 +58,34 @@ def is_usd_file(path: Path) -> bool:
         path: Candidate file path.
     """
     return path.suffix.lower() in USD_SUFFIXES
+
+
+def is_mtqt_stage(path: Path) -> bool:
+    """Return whether the USD file at ``path`` is a scene this app saved.
+
+    Only the root layer is inspected (no composition): it carries the
+    :data:`LAYER_MARKER`, or, for scenes saved before the marker, a
+    ``/World`` prim whose children carry ``mtqt`` custom data. Stages from
+    other tools are opened as models instead, so Save never overwrites
+    them.
+
+    Args:
+        path: Candidate file. A non-USD or unreadable file gives ``False``.
+    """
+    if not is_usd_file(path) or not path.is_file():
+        return False
+    try:
+        layer = Sdf.Layer.FindOrOpen(str(path))
+    except Tf.ErrorException:
+        return False
+    if layer is None:
+        return False
+    if LAYER_MARKER in layer.customLayerData:
+        return True
+    world = layer.GetPrimAtPath(ROOT)
+    if world is None:
+        return False
+    return any("mtqt" in child.customData for child in world.nameChildren)
 
 
 # -- save ---------------------------------------------------------------------
@@ -107,6 +137,7 @@ def save_usd_scene(document: SceneDocument, path: Path) -> Path:
         define_camera(stage, prim_path, camera, index)
 
     layer = stage.GetRootLayer()
+    layer.customLayerData = {**layer.customLayerData, LAYER_MARKER: 1}
     if document.animations:
         clips_dir = path.parent / f"{path.stem}_clips"
         clips_dir.mkdir(exist_ok=True)
@@ -174,8 +205,8 @@ def load_usd_scene(path: Path) -> SceneDocument:
     Stages this app wrote come back unchanged. For stages from other tools,
     ``Xform`` hierarchies, ``Cube`` / ``Sphere`` / ``Plane`` prims, lights,
     and cameras are read; ``Mesh`` prims without a model file this app can
-    load are skipped with a log message, since the viewport draws meshes
-    from model files.
+    load are skipped with a log message. The window opens such stages as
+    models instead (see :func:`is_mtqt_stage`), which reads their meshes.
 
     Args:
         path: ``.usda``, ``.usdc``, or ``.usd`` file.
