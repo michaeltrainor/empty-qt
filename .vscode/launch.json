@@ -110,6 +110,18 @@
       }
     },
     {
+      "name": "TagInput",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/tag_input.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "NodeGraph",
       "type": "debugpy",
       "request": "launch",

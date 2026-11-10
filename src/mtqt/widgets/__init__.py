@@ -7,6 +7,7 @@ from mtqt.widgets.properties_book import PropertiesBook
 from mtqt.widgets.properties_panel import PropertiesPanel
 from mtqt.widgets.range_slider import RangeSlider
 from mtqt.widgets.scene_graph_tree import SceneGraphTree
+from mtqt.widgets.tag_input import TagInput
 from mtqt.widgets.timeline_bar import TimelineBar
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "PropertiesPanel",
     "RangeSlider",
     "SceneGraphTree",
+    "TagInput",
     "TimelineBar",
 ]

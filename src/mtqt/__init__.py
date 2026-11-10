@@ -23,6 +23,7 @@ from mtqt.widgets import (
     PropertiesPanel,
     RangeSlider,
     SceneGraphTree,
+    TagInput,
     TimelineBar,
 )
 
@@ -51,6 +52,7 @@ __all__ = [
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",
+    "TagInput",
     "TimelineBar",
     "__version__",
     "apply_stylesheet",

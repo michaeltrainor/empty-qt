@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `TagInput`: one row of chips and a line edit. Enter or a comma commits
+  a tag, Backspace on an empty draft removes the last one, and
+  `tagsChanged` emits the new tuple. Example in `examples/tag_input.py`.
 - `CommandPalette`: line edit over a ranked command list. An empty query
   lists every command. Typing keeps subsequence matches, tighter ones
   first. Enter emits `commandTriggered` with the command id. Example in

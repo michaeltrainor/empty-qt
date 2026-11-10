@@ -244,3 +244,34 @@ CommandPalette QListWidget::item:selected {
     background-color: #3e5f8a;
     color: #eeeeee;
 }
+
+TagInput {
+    background-color: #2f2f2f;
+    border: 1px solid #565656;
+    border-radius: 4px;
+}
+
+TagInput QLineEdit {
+    border: none;
+    background: transparent;
+    min-width: 80px;
+    padding: 2px 4px;
+}
+
+#TagChip {
+    background-color: #4a4a4a;
+    border: 1px solid #565656;
+    border-radius: 8px;
+}
+
+#TagChip QLabel {
+    color: #eeeeee;
+    background: transparent;
+}
+
+#TagChip QToolButton {
+    border: none;
+    color: #b0b0b0;
+    padding: 0 4px;
+    background: transparent;
+}

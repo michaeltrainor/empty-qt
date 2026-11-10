@@ -191,6 +191,19 @@ palette.set_commands(
 palette.commandTriggered.connect(print)
 ```
 
+## Tag input
+
+`TagInput` is one horizontal row of chips and a line edit. `set_tags` strips whitespace, drops blanks and duplicates, and keeps the first occurrence. It stays silent. Enter or a comma commits the draft. Backspace on an empty draft removes the last tag, and each chip has a remove button. `tagsChanged` emits the new tuple of tags when a commit or a remove changes the row. A blank or duplicate commit does not emit. `set_suggestions` feeds the line edit's popup completer.
+
+```python
+from mtqt import TagInput
+
+tags = TagInput(parent=window)
+tags.set_suggestions(["hero", "prop", "camera"])
+tags.set_tags(["hero"])
+tags.tagsChanged.connect(print)
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.
