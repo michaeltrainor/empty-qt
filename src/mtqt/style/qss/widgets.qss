@@ -219,3 +219,114 @@ PropertiesPanel QDoubleSpinBox[invalid="true"] {
     background-color: #5c5c5c;
     border: none;
 }
+
+RangeSlider {
+    min-height: 24px;
+    background-color: transparent;
+}
+
+CommandPalette QLineEdit {
+    min-height: 22px;
+}
+
+CommandPalette QListWidget {
+    background-color: #2f2f2f;
+    border: 1px solid #565656;
+    border-radius: 4px;
+}
+
+CommandPalette QListWidget::item {
+    padding: 4px 8px;
+}
+
+CommandPalette QListWidget::item:selected {
+    background-color: #3e5f8a;
+    color: #eeeeee;
+}
+
+TagInput {
+    background-color: #2f2f2f;
+    border: 1px solid #565656;
+    border-radius: 4px;
+}
+
+TagInput QLineEdit {
+    border: none;
+    background: transparent;
+    min-width: 80px;
+    padding: 2px 4px;
+}
+
+#TagChip {
+    background-color: #4a4a4a;
+    border: 1px solid #565656;
+    border-radius: 8px;
+}
+
+#TagChip QLabel {
+    color: #eeeeee;
+    background: transparent;
+}
+
+#TagChip QToolButton {
+    border: none;
+    color: #b0b0b0;
+    padding: 0 4px;
+    background: transparent;
+}
+
+ToastStack {
+    background: transparent;
+}
+
+Toast {
+    background-color: #3c3c3c;
+    color: #eeeeee;
+    border: 1px solid #565656;
+    border-radius: 6px;
+}
+
+Toast[level="warning"] {
+    background-color: #4a4a4a;
+    border: 1px solid #3e5f8a;
+    color: #eeeeee;
+}
+
+Toast[level="error"] {
+    background-color: #5e3236;
+    color: #e85d5d;
+    border: 1px solid #e85d5d;
+}
+
+Toast QLabel,
+Toast QToolButton {
+    background: transparent;
+}
+
+Toast QToolButton {
+    border: none;
+    color: #b0b0b0;
+    padding: 0 4px;
+}
+
+BreadcrumbBar {
+    background: transparent;
+}
+
+BreadcrumbBar QPushButton {
+    background: transparent;
+    border: none;
+    color: #b0b0b0;
+    padding: 2px 4px;
+}
+
+BreadcrumbBar QPushButton[current="true"] {
+    color: #eeeeee;
+    font-weight: 600;
+}
+
+#BreadcrumbChevron {
+    color: #565656;
+    background: transparent;
+    padding: 0 2px;
+}

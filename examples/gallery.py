@@ -20,6 +20,10 @@ from PySide6.QtWidgets import (
 )
 
 from mtqt import (
+    BreadcrumbBar,
+    Command,
+    CommandPalette,
+    Crumb,
     DropWidget,
     LabeledLineEdit,
     NodeGraph,
@@ -27,7 +31,11 @@ from mtqt import (
     ObjectListModel,
     ObjectTableModel,
     PathPicker,
+    RangeSlider,
     SceneGraphTree,
+    TagInput,
+    ToastLevel,
+    ToastStack,
     apply_stylesheet,
     ensure_application,
 )
@@ -178,6 +186,7 @@ class GalleryWindow(QMainWindow):
 
         tabs = QTabWidget(self)
         tabs.addTab(self._build_widgets_tab(), "Widgets")
+        tabs.addTab(self._build_tools_tab(), "Tools")
         tabs.addTab(self._build_list_tab(), "List")
         tabs.addTab(self._build_table_tab(), "Table")
         tabs.addTab(self._build_tree_tab(), "Tree")
@@ -217,6 +226,82 @@ class GalleryWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.addWidget(name)
         layout.addWidget(path)
+        layout.addWidget(log, stretch=1)
+        return page
+
+    def _build_tools_tab(self) -> QWidget:
+        page = QWidget(self)
+        log = QPlainTextEdit(page)
+        log.setReadOnly(True)
+        log.setPlaceholderText("Signal log")
+
+        def log_line(message: str) -> None:
+            log.appendPlainText(message)
+
+        bar = BreadcrumbBar(page)
+        bar.set_crumbs(
+            (
+                Crumb("assets", "Assets"),
+                Crumb("characters", "Characters"),
+                Crumb("hero", "Hero"),
+                Crumb("body", "Body"),
+            )
+        )
+        bar.crumbActivated.connect(lambda key: log_line(f"crumbActivated: {key}"))
+
+        slider = RangeSlider(page)
+        slider.set_values(20, 80)
+        slider.rangeChanged.connect(
+            lambda lower, upper: log_line(f"rangeChanged: {lower}, {upper}")
+        )
+
+        palette = CommandPalette(page)
+        palette.setMinimumHeight(160)
+        palette.set_commands(
+            (
+                Command("open-scene", "Open Scene", "Load a scene file"),
+                Command("save-scene", "Save Scene", "Write the current scene"),
+                Command("preferences", "Preferences"),
+                Command("frame-all", "Frame All"),
+            )
+        )
+        palette.commandTriggered.connect(
+            lambda command_id: log_line(f"commandTriggered: {command_id}")
+        )
+
+        tags = TagInput(page)
+        tags.set_suggestions(("hero", "prop", "camera", "light"))
+        tags.tagsChanged.connect(lambda value: log_line(f"tagsChanged: {value}"))
+
+        stack = ToastStack(page)
+        stack.setMinimumHeight(96)
+        info = QPushButton("Info", page)
+        warning = QPushButton("Warning", page)
+        error = QPushButton("Error", page)
+        info.clicked.connect(lambda: stack.show_toast("Saved the scene"))
+        warning.clicked.connect(
+            lambda: stack.show_toast("Unsaved changes", level=ToastLevel.WARNING)
+        )
+        error.clicked.connect(
+            lambda: stack.show_toast("Could not save", level=ToastLevel.ERROR)
+        )
+        stack.toastDismissed.connect(
+            lambda toast_id: log_line(f"toastDismissed: {toast_id}")
+        )
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(info)
+        buttons.addWidget(warning)
+        buttons.addWidget(error)
+        buttons.addStretch(1)
+
+        layout = QVBoxLayout(page)
+        layout.addWidget(bar)
+        layout.addWidget(slider)
+        layout.addWidget(palette, stretch=2)
+        layout.addWidget(tags)
+        layout.addLayout(buttons)
+        layout.addWidget(stack, stretch=1)
         layout.addWidget(log, stretch=1)
         return page
 

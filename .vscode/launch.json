@@ -86,6 +86,66 @@
       }
     },
     {
+      "name": "RangeSlider",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/range_slider.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "CommandPalette",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/command_palette.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "TagInput",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/tag_input.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "ToastStack",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/toast_stack.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
+      "name": "BreadcrumbBar",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/breadcrumb_bar.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "NodeGraph",
       "type": "debugpy",
       "request": "launch",
