@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `ToastStack`: transient messages, newest on top. `show_toast` returns
+  an id, a timer or the close button dismisses it, and `toastDismissed`
+  fires once. Example in `examples/toast_stack.py`.
 - `TagInput`: one row of chips and a line edit. Enter or a comma commits
   a tag, Backspace on an empty draft removes the last one, and
   `tagsChanged` emits the new tuple. Example in `examples/tag_input.py`.

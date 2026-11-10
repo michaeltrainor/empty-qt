@@ -275,3 +275,37 @@ TagInput QLineEdit {
     padding: 0 4px;
     background: transparent;
 }
+
+ToastStack {
+    background: transparent;
+}
+
+Toast {
+    background-color: #3c3c3c;
+    color: #eeeeee;
+    border: 1px solid #565656;
+    border-radius: 6px;
+}
+
+Toast[level="warning"] {
+    background-color: #4a4a4a;
+    border: 1px solid #3e5f8a;
+    color: #eeeeee;
+}
+
+Toast[level="error"] {
+    background-color: #5e3236;
+    color: #e85d5d;
+    border: 1px solid #e85d5d;
+}
+
+Toast QLabel,
+Toast QToolButton {
+    background: transparent;
+}
+
+Toast QToolButton {
+    border: none;
+    color: #b0b0b0;
+    padding: 0 4px;
+}

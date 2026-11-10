@@ -204,6 +204,20 @@ tags.set_tags(["hero"])
 tags.tagsChanged.connect(print)
 ```
 
+## Toast stack
+
+`ToastStack` is a vertical stack of transient messages. The newest row is on top. `show_toast` returns a new id. The default timeout is 4 seconds. `timeout_ms` of 0 or less stays until `dismiss`. Each row is a `Toast` frame with a `level` property of `info`, `warning`, or `error`. `dismiss` removes that id. An unknown id does nothing, and a second dismiss does not emit again. `toastDismissed(str)` fires when a toast goes away, from its close button or from its timer. `toasts` lists the ids newest first.
+
+```python
+from mtqt import ToastLevel, ToastStack
+
+stack = ToastStack(parent=window)
+toast_id = stack.show_toast("Saved the scene")
+stack.show_toast("Could not save", level=ToastLevel.ERROR, timeout_ms=0)
+stack.toastDismissed.connect(print)
+stack.dismiss(toast_id)
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.

@@ -79,6 +79,7 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - RangeSlider — `examples/range_slider.py`
 - CommandPalette — `examples/command_palette.py`
 - TagInput — `examples/tag_input.py`
+- ToastStack — `examples/toast_stack.py`
 - SceneViewport — `scene_viewport` (module)
 - NodeGraph — `examples/node_graph.py`
 - DropWidget — `examples/drop_widget.py`

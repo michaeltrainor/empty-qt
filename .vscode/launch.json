@@ -122,6 +122,18 @@
       }
     },
     {
+      "name": "ToastStack",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/toast_stack.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    },
+    {
       "name": "NodeGraph",
       "type": "debugpy",
       "request": "launch",
