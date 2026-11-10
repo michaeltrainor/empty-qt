@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QCompleter,
@@ -31,16 +31,12 @@ def _normalize(tags: Sequence[str]) -> tuple[str, ...]:
 
 
 class _TagChip(QFrame):
-    """One tag and its remove button."""
-
     remove_requested = Signal(str)
 
     def __init__(self, label: str, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("TagChip")
         self._label = label
-        # A plain frame skips a stylesheet background unless this is set.
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         text = QLabel(label, self)
         remove = QToolButton(self)
@@ -83,7 +79,6 @@ class TagInput(QFrame):
         super().__init__(parent)
         self.setObjectName("TagInput")
         self.setAccessibleName("Tags")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._updating = False
         self._tags: tuple[str, ...] = ()
@@ -176,9 +171,7 @@ class TagInput(QFrame):
         self._remove_tag(self._tags[-1])
 
     def _on_chip_remove(self, label: str) -> None:
-        # The remove button is still inside its clicked slot. Delete the
-        # chip on the next turn.
-        QTimer.singleShot(0, self, lambda label=label: self._remove_tag(label))
+        self._remove_tag(label)
 
     def _rebuild_chips(self) -> None:
         while self._layout.count() > 1:

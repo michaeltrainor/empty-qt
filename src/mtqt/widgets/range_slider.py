@@ -116,13 +116,6 @@ class RangeSlider(QWidget):
             self._updating = False
 
     def _drag_to(self, handle: int, value: float) -> None:
-        """Move one handle the way a drag does, and emit when it changes.
-
-        Args:
-            handle: ``0`` for the lower handle, ``1`` for the upper handle.
-            value: Wanted position for that handle. Clamped so the handles
-                never cross and both stay inside the bounds.
-        """
         value = float(value)
         if handle == 0:
             lower = min(max(value, self._minimum), self._upper)

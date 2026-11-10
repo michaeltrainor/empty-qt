@@ -33,12 +33,6 @@ class Command:
 
 
 def _best_span(haystack: str, needle: str) -> int | None:
-    """Return the tightest in-order span of ``needle`` in ``haystack``.
-
-    The span is the sum of the index gaps between matched characters,
-    which is the distance from the first matched character to the last.
-    ``None`` means ``needle`` is not a subsequence.
-    """
     best: int | None = None
     tight = len(needle) - 1
     for start, char in enumerate(haystack):

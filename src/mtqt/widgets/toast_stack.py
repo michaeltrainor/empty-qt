@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -47,8 +47,6 @@ class Toast(QFrame):
         super().__init__(parent)
         self.setObjectName("Toast")
         self.setProperty("level", level.value)
-        # A frame skips a stylesheet background unless this is set.
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         style = self.style()
         if style is not None:
             style.unpolish(self)
@@ -76,6 +74,7 @@ class Toast(QFrame):
 class _Row:
     toast_id: str
     widget: Toast
+    timer: QTimer | None = None
 
 
 class ToastStack(QWidget):
@@ -101,7 +100,6 @@ class ToastStack(QWidget):
         super().__init__(parent)
         self.setObjectName("ToastStack")
         self.setAccessibleName("Toasts")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._next_id = 0
         self._rows: list[_Row] = []
@@ -135,23 +133,19 @@ class ToastStack(QWidget):
         """
         self._next_id += 1
         toast_id = str(self._next_id)
-        row = Toast(text, level, self)
-        row.dismiss_requested.connect(lambda toast_id=toast_id: self.dismiss(toast_id))
+        row_widget = Toast(text, level, self)
+        row_widget.dismiss_requested.connect(
+            lambda toast_id=toast_id: self.dismiss(toast_id)
+        )
+        timer: QTimer | None = None
         if timeout_ms > 0:
-            timer = QTimer(row)
+            timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(
-                lambda toast_id=toast_id: self._dismiss_after_timeout(toast_id)
-            )
+            timer.timeout.connect(lambda toast_id=toast_id: self.dismiss(toast_id))
             timer.start(timeout_ms)
-        self._rows.insert(0, _Row(toast_id, row))
-        self._layout.insertWidget(0, row)
+        self._rows.insert(0, _Row(toast_id, row_widget, timer))
+        self._layout.insertWidget(0, row_widget)
         return toast_id
-
-    def _dismiss_after_timeout(self, toast_id: str) -> None:
-        # The row owns the timer. Deleting the row inside the timeout
-        # callback frees that timer before the callback returns.
-        QTimer.singleShot(0, self, lambda toast_id=toast_id: self.dismiss(toast_id))
 
     def dismiss(self, toast_id: str) -> None:
         """Remove one toast. An unknown id does nothing.
@@ -167,17 +161,11 @@ class ToastStack(QWidget):
             return
         row = self._rows.pop(index)
         widget = row.widget
-        for timer in widget.findChildren(QTimer):
-            # A timer that already fired cannot be deleteLater'd here. The
-            # offscreen platform crashes on the next processEvents. Park it
-            # on the stack until the stack is destroyed. A timer that has
-            # not fired yet can be deleted with the row.
-            fired = not timer.isActive()
-            timer.stop()
-            if fired:
-                timer.setParent(self)
-            else:
-                timer.deleteLater()
+        # deleteLater on a timer that has already fired segfaults in the next
+        # offscreen processEvents. That timer stays parented to the stack.
+        if row.timer is not None and row.timer.isActive():
+            row.timer.stop()
+            row.timer.deleteLater()
         self._layout.removeWidget(widget)
         widget.hide()
         widget.deleteLater()

@@ -220,7 +220,6 @@ PropertiesPanel QDoubleSpinBox[invalid="true"] {
     border: none;
 }
 
-/* RangeSlider paints its groove and handles. The sheet only reserves the row. */
 RangeSlider {
     min-height: 24px;
     background-color: transparent;
