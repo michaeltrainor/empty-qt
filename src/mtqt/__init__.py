@@ -11,8 +11,10 @@ from mtqt.models import (
 )
 from mtqt.style import apply_stylesheet, load_stylesheet
 from mtqt.widgets import (
+    BreadcrumbBar,
     Command,
     CommandPalette,
+    Crumb,
     DropWidget,
     GraphHistory,
     LabeledLineEdit,
@@ -37,8 +39,10 @@ except PackageNotFoundError:
 
 __all__ = [
     "SCENE_GRAPH_MIME_TYPE",
+    "BreadcrumbBar",
     "Command",
     "CommandPalette",
+    "Crumb",
     "DropWidget",
     "GraphHistory",
     "LabeledLineEdit",

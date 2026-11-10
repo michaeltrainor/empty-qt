@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `BreadcrumbBar`: clickable path segments in a scrolling row. `set_crumbs`
+  stays silent, and `crumbActivated` emits the clicked segment's key.
+  Example in `examples/breadcrumb_bar.py`.
 - `ToastStack`: transient messages, newest on top. `show_toast` returns
   an id, a timer or the close button dismisses it, and `toastDismissed`
   fires once. Example in `examples/toast_stack.py`.

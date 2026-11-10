@@ -309,3 +309,25 @@ Toast QToolButton {
     color: #b0b0b0;
     padding: 0 4px;
 }
+
+BreadcrumbBar {
+    background: transparent;
+}
+
+BreadcrumbBar QPushButton {
+    background: transparent;
+    border: none;
+    color: #b0b0b0;
+    padding: 2px 4px;
+}
+
+BreadcrumbBar QPushButton[current="true"] {
+    color: #eeeeee;
+    font-weight: 600;
+}
+
+#BreadcrumbChevron {
+    color: #565656;
+    background: transparent;
+    padding: 0 2px;
+}

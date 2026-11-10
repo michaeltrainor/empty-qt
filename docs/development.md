@@ -80,6 +80,7 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - CommandPalette — `examples/command_palette.py`
 - TagInput — `examples/tag_input.py`
 - ToastStack — `examples/toast_stack.py`
+- BreadcrumbBar — `examples/breadcrumb_bar.py`
 - SceneViewport — `scene_viewport` (module)
 - NodeGraph — `examples/node_graph.py`
 - DropWidget — `examples/drop_widget.py`

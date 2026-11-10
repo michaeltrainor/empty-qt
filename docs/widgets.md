@@ -218,6 +218,24 @@ stack.toastDismissed.connect(print)
 stack.dismiss(toast_id)
 ```
 
+## Breadcrumb bar
+
+`BreadcrumbBar` is a horizontal row of clickable path segments inside a scroll area, so a long asset path can scroll. `set_crumbs` replaces the row and stays silent. The last segment has the dynamic property `current` set. Marks between segments are labels. Clicking a segment emits `crumbActivated(str)` with that segment's key and does not rebuild the row. A `set_crumbs` call made while that signal is still running waits until the click has returned.
+
+```python
+from mtqt import BreadcrumbBar, Crumb
+
+bar = BreadcrumbBar(parent=window)
+bar.set_crumbs(
+    [
+        Crumb("assets", "Assets"),
+        Crumb("hero", "Hero"),
+        Crumb("body", "Body"),
+    ]
+)
+bar.crumbActivated.connect(print)
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.

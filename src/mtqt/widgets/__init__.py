@@ -1,3 +1,4 @@
+from mtqt.widgets.breadcrumb_bar import BreadcrumbBar, Crumb
 from mtqt.widgets.command_palette import Command, CommandPalette
 from mtqt.widgets.drag_n_drop import DropWidget
 from mtqt.widgets.labeled_line_edit import LabeledLineEdit
@@ -12,8 +13,10 @@ from mtqt.widgets.timeline_bar import TimelineBar
 from mtqt.widgets.toast_stack import ToastLevel, ToastStack
 
 __all__ = [
+    "BreadcrumbBar",
     "Command",
     "CommandPalette",
+    "Crumb",
     "DropWidget",
     "GraphHistory",
     "LabeledLineEdit",
