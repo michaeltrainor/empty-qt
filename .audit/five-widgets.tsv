@@ -1,0 +1,9 @@
+ts	phase	decision	why	evidence	result
+2026-11-10T06:40:00Z	start	opened the five-widget run on main at c7efa7d	Michael wants five new widgets on one branch and will pull it later	branch mtdev/five-tool-widgets-db73	open
+2026-11-10T06:45:00Z	frame	chose CommandPalette, ToastStack, RangeSlider, BreadcrumbBar, and TagInput	each is missing from src/mtqt/widgets and fits tool and asset UIs	src/mtqt/widgets/__init__.py	open
+2026-11-10T06:45:00Z	frame	skipped a scrubber, a node view, a file picker, a single slider, a color dialog swatch, and tabbed properties	TimelineBar, NodeGraphWidget, PathPicker, PropertiesPanel, and PropertiesBook already cover those	src/mtqt/widgets/timeline_bar.py, properties_panel.py _ColorEditor	open
+2026-11-10T06:46:00Z	frame	paint and QSS stay on the Maya gray tokens, not a new Nord sheet	style package has base.qss and widgets.qss only, and docs say v1 is not a theme engine	src/mtqt/style/qss/base.qss	open
+2026-11-10T06:46:00Z	frame	one writer on one branch, no parallel widget branches	__init__, changelog, docs, gallery, and qss are shared, and Michael asked for one branch	branch mtdev/five-tool-widgets-db73	open
+2026-11-10T06:48:00Z	frame	kept the five widgets after the inventory report	it found no public command list, toast stack, dual slider, breadcrumb, or tag field	src/mtqt/widgets/__init__.py	open
+2026-11-10T07:20:00Z	build	landed the five widgets in six commits	one widget was tested before the next so a break stayed local	850f59c 99abe29 2b60f9d d851459 d01d9a9 cd988a5	committed
+2026-11-10T07:31:47Z	verify	re-ran ruff, format, pyright, pytest, and mkdocs on this machine	the delegate report is not the proof	395 passed, coverage 87.01%, pyright 0 errors, mkdocs build --strict	tests green
