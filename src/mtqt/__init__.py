@@ -19,6 +19,7 @@ from mtqt.widgets import (
     PathPicker,
     PropertiesBook,
     PropertiesPanel,
+    RangeSlider,
     SceneGraphTree,
     TimelineBar,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "PathPicker",
     "PropertiesBook",
     "PropertiesPanel",
+    "RangeSlider",
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",

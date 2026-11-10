@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `RangeSlider`: horizontal dual-handle slider. The host sets bounds and
+  values without a signal. A drag emits `rangeChanged` with the lower and
+  upper values. Example in `examples/range_slider.py`.
 - Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
   `.usd`) next to JSON. Transforms, primitives, imported meshes (with
   their triangles embedded for other tools), Mesh tab materials as

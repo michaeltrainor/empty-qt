@@ -160,6 +160,19 @@ timer.timeout.connect(lambda: bar.set_time(player.time))
 
 The scene viewport shows one under the viewport when the scene has animation clips.
 
+## Range slider
+
+`RangeSlider` is a horizontal slider with two handles. The values stay ordered, minimum <= lower <= upper <= maximum. The default bounds are 0 and 100, and the handles start at those ends. `set_bounds` and `set_values` stay silent, so a host can push a model on a timer. `rangeChanged(float, float)` fires when the user drags a handle, with the lower value and then the upper value. A drag cannot push one handle past the other.
+
+```python
+from mtqt import RangeSlider
+
+slider = RangeSlider(parent=window)
+slider.set_bounds(0, 100)
+slider.set_values(20, 80)
+slider.rangeChanged.connect(lambda lower, upper: print(lower, upper))
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.
