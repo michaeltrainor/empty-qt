@@ -1,3 +1,4 @@
+from mtqt.widgets.command_palette import Command, CommandPalette
 from mtqt.widgets.drag_n_drop import DropWidget
 from mtqt.widgets.labeled_line_edit import LabeledLineEdit
 from mtqt.widgets.node_graph import GraphHistory, NodeGraph, NodeGraphWidget
@@ -9,6 +10,8 @@ from mtqt.widgets.scene_graph_tree import SceneGraphTree
 from mtqt.widgets.timeline_bar import TimelineBar
 
 __all__ = [
+    "Command",
+    "CommandPalette",
     "DropWidget",
     "GraphHistory",
     "LabeledLineEdit",

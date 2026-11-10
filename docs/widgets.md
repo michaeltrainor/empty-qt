@@ -173,6 +173,24 @@ slider.set_values(20, 80)
 slider.rangeChanged.connect(lambda lower, upper: print(lower, upper))
 ```
 
+## Command palette
+
+`CommandPalette` is a line edit over a list of `Command` values. A host embeds it and fills the list. An empty query shows every command in the order given. Any other query keeps commands whose title and detail contain those characters in order, ignoring case, and ranks a tighter match first. `set_commands` keeps the current query. `set_commands` and `set_query` stay silent. Up and Down move the highlight. Enter, or activating a row, emits `commandTriggered(str)` with the command id. Escape clears the query and emits nothing.
+
+```python
+from mtqt import Command, CommandPalette
+
+palette = CommandPalette(parent=window)
+palette.set_commands(
+    [
+        Command("open-scene", "Open Scene", "Load a scene file"),
+        Command("save-scene", "Save Scene"),
+        Command("preferences", "Preferences"),
+    ]
+)
+palette.commandTriggered.connect(print)
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.

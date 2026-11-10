@@ -77,6 +77,7 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 - SceneGraphTree — `examples/scene_graph_tree.py`
 - TimelineBar — `examples/timeline_bar.py`
 - RangeSlider — `examples/range_slider.py`
+- CommandPalette — `examples/command_palette.py`
 - SceneViewport — `scene_viewport` (module)
 - NodeGraph — `examples/node_graph.py`
 - DropWidget — `examples/drop_widget.py`

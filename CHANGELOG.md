@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `CommandPalette`: line edit over a ranked command list. An empty query
+  lists every command. Typing keeps subsequence matches, tighter ones
+  first. Enter emits `commandTriggered` with the command id. Example in
+  `examples/command_palette.py`.
 - `RangeSlider`: horizontal dual-handle slider. The host sets bounds and
   values without a signal. A drag emits `rangeChanged` with the lower and
   upper values. Example in `examples/range_slider.py`.

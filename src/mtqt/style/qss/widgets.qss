@@ -225,3 +225,22 @@ RangeSlider {
     min-height: 24px;
     background-color: transparent;
 }
+
+CommandPalette QLineEdit {
+    min-height: 22px;
+}
+
+CommandPalette QListWidget {
+    background-color: #2f2f2f;
+    border: 1px solid #565656;
+    border-radius: 4px;
+}
+
+CommandPalette QListWidget::item {
+    padding: 4px 8px;
+}
+
+CommandPalette QListWidget::item:selected {
+    background-color: #3e5f8a;
+    color: #eeeeee;
+}
