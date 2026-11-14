@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Stage editor: a new `apps/stage_editor` app where the OpenUSD stage is
+  the document and Hydra Storm draws it. New, Open, Save, and Save As
+  work on USD files; a USD file from another tool is referenced into a
+  new untitled scene instead of edited, and Add Reference composes more
+  files. It has an outliner over the prims, click picking, Frame
+  Selection and Frame All, and a timeline that plays stage time. Run it
+  with `uv run --package stage-editor stage-editor`; the view needs the
+  imaging build from `scripts/build_usd_imaging.cmd` on `PYTHONPATH`.
 - Development: `scripts/build_usd_imaging.cmd` builds OpenUSD 26.11 with
   Hydra Storm against the repository's `.venv` Python, and
   `scripts/hydra_spike.py` draws a USD stage with `UsdImagingGL` in a
