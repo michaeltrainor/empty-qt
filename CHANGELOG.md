@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Development: `scripts/build_usd_imaging.cmd` builds OpenUSD 26.11 with
+  Hydra Storm against the repository's `.venv` Python, and
+  `scripts/hydra_spike.py` draws a USD stage with `UsdImagingGL` in a
+  `QOpenGLWidget` with picking, playback, and a benchmark flag. The
+  spike results are recorded in the USD architecture page.
 - Scene viewport: OpenUSD files open and import as models. `.usd`,
   `.usda`, `.usdc`, and `.usdz` stages from other tools (for example the
   UsdSkel examples) are read like glTF: their `Mesh` prims (polygons

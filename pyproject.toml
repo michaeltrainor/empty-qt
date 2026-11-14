@@ -62,6 +62,8 @@ ignore = ["D102", "D104", "D105", "D107", "D203", "D213", "D401", "D413"]
 "tests/**" = ["D"]
 "examples/**" = ["D", "T20"]
 "apps/**" = ["D", "T20"]
+# Developer scripts report on stdout.
+"scripts/**" = ["T20"]
 # Claude Code hooks report to Claude on stderr.
 ".claude/hooks/**" = ["T20"]
 
