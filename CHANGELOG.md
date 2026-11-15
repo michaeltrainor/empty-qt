@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Stage editor: usdview-style tooling. Panels dock with the Qt Advanced
+  Docking System (new app dependency `PySide6-QtAds`), and the layout
+  and view settings are remembered. The Display menu sets draw mode,
+  complexity, purposes, lights, AOV, background, selection bounds, and a
+  HUD; the Camera menu looks through stage cameras; the pick mode
+  selects prims, models, or instances. The outliner gains type and
+  visibility columns, usdview's colours, filters, search, and a context
+  menu whose visibility, active, and payload changes go to the session
+  layer. A new inspector shows properties with their value sources,
+  metadata and variants, the layer stack, and composition arcs. Attribute
+  values and variant selections can be edited and undone. A layers panel
+  sets the edit target, mutes layers, and shows them as usda. Tools add a
+  UsdValidation panel (usdchecker's checks, with fixers) and a Python
+  console. New flags follow usdview: `--camera`, `--unloaded`, `--mask`,
+  `--complexity`, `--draw-mode`, `--select`, and `--cf`. See the new
+  Stage editor docs page.
 - Stage editor: a new `apps/stage_editor` app where the OpenUSD stage is
   the document and Hydra Storm draws it. New, Open, Save, and Save As
   work on USD files; a USD file from another tool is referenced into a
