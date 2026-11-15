@@ -64,6 +64,17 @@ def _reference_target(layer: Sdf.Layer, path: Path) -> Sdf.Path:
     return roots[0].path
 
 
+def _copy_time_range(source: Sdf.Layer, target: Sdf.Layer) -> None:
+    """Give ``target`` the time range and rates of ``source``, where authored."""
+    if not (source.HasStartTimeCode() and source.HasEndTimeCode()):
+        return
+    target.startTimeCode = source.startTimeCode
+    target.endTimeCode = source.endTimeCode
+    if source.HasTimeCodesPerSecond():
+        target.timeCodesPerSecond = source.timeCodesPerSecond
+        target.framesPerSecond = source.framesPerSecond or source.timeCodesPerSecond
+
+
 class StageDocument(QObject):
     """One open scene: a ``Usd.Stage`` whose root layer stack is what Save writes.
 
@@ -240,6 +251,7 @@ class StageDocument(QObject):
             str(path), Sdf.Path.emptyPath if layer.defaultPrim else target
         )
         spec.referenceList.Prepend(reference)
+        _copy_time_range(layer, root)
         self._source_map = (target, prim_path)
         mapped = [self.map_source_path(p) for p in mask]
         stage = self._open_stage(root, mapped, load_set)
@@ -247,7 +259,6 @@ class StageDocument(QObject):
             msg = f"cannot compose {path}"
             raise ValueError(msg)
         self._bind(stage, None)
-        self._adopt_time_range(layer)
         return False
 
     def _open_stage(

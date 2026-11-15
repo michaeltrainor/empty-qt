@@ -32,6 +32,7 @@ from stage_editor.display import (
 )
 from stage_editor.document import USD_SUFFIXES, StageDocument
 from stage_editor.hydra_view import HydraView, hydra_available, stage_cameras
+from stage_editor.inspector import Inspector
 from stage_editor.outliner import Outliner
 
 FILE_FILTER = "USD files (" + " ".join(f"*{s}" for s in USD_SUFFIXES) + ")"
@@ -196,13 +197,21 @@ class StageEditorWindow(QMainWindow):
         outliner = self._add_dock(
             "Outliner", self.outliner, ads.DockWidgetArea.LeftDockWidgetArea
         )
+        self.inspector = Inspector(self.document, self)
+        inspector = self._add_dock(
+            "Inspector", self.inspector, ads.DockWidgetArea.RightDockWidgetArea
+        )
         self.timeline = TimelineBar(self)
         timeline = self._add_dock(
-            "Timeline", self.timeline, ads.DockWidgetArea.BottomDockWidgetArea
+            "Timeline",
+            self.timeline,
+            ads.DockWidgetArea.BottomDockWidgetArea,
+            no_tab=True,
         )
         timeline.setFeature(ads.CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
-        timeline.setFeature(ads.CDockWidget.DockWidgetFeature.NoTab, True)
-        self.dock_manager.setSplitterSizes(outliner.dockAreaWidget(), [380, 1220])
+        container = outliner.dockAreaWidget()
+        self.dock_manager.setSplitterSizes(container, [380, 800, 420])
+        del inspector
         self.playback = StagePlayback(self.document, self.timeline, self)
 
         self._status = QLabel(self)
@@ -224,6 +233,8 @@ class StageEditorWindow(QMainWindow):
         widget: QWidget,
         area: Any,
         beside: Any = None,
+        *,
+        no_tab: bool = False,
     ) -> Any:
         """Add ``widget`` as a dock in ``area``, or as a tab beside dock ``beside``.
 
@@ -233,6 +244,7 @@ class StageEditorWindow(QMainWindow):
         dock = ads.CDockWidget(title, self)
         dock.setObjectName(f"{title.replace(' ', '')}Dock")
         dock.setWidget(widget)
+        dock.setFeature(ads.CDockWidget.DockWidgetFeature.NoTab, no_tab)
         self.docks[title] = dock
         if beside is not None:
             self.dock_manager.addDockWidgetTabToArea(dock, beside.dockAreaWidget())
@@ -600,6 +612,7 @@ class StageEditorWindow(QMainWindow):
     def _on_outliner_selection(self, paths: list[str]) -> None:
         if self.view is not None:
             self.view.set_selected_paths(paths)
+        self.inspector.set_prim_path(paths[0] if paths else "")
 
     def _on_picked(self, path: str) -> None:
         modifiers = QApplication.keyboardModifiers()
