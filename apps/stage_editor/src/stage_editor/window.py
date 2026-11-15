@@ -203,6 +203,7 @@ class StageEditorWindow(QMainWindow):
             "Outliner", self.outliner, ads.DockWidgetArea.LeftDockWidgetArea
         )
         self.inspector = Inspector(self.document, self)
+        self.inspector.message.connect(self._show_message)
         inspector = self._add_dock(
             "Inspector", self.inspector, ads.DockWidgetArea.RightDockWidgetArea
         )
@@ -343,6 +344,13 @@ class StageEditorWindow(QMainWindow):
 
         edit_menu = bar.addMenu("&Edit")
         self._edit_menu = edit_menu
+        undo = self.document.undo_stack.createUndoAction(self, "&Undo")
+        undo.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo))
+        redo = self.document.undo_stack.createRedoAction(self, "&Redo")
+        redo.setShortcut(QKeySequence(QKeySequence.StandardKey.Redo))
+        edit_menu.addAction(undo)
+        edit_menu.addAction(redo)
+        edit_menu.addSeparator()
         self._action("&Find Prim", "Ctrl+F", self.outliner.focus_search, edit_menu)
         self._action(
             "&Copy Prim Path", "Ctrl+Shift+C", self.outliner.copy_paths, edit_menu
@@ -634,6 +642,11 @@ class StageEditorWindow(QMainWindow):
         event.accept()
 
     # -- selection and view ---------------------------------------------------
+
+    def _show_message(self, text: str) -> None:
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage(text, 8000)
 
     def _validate(self) -> None:
         dock = self.docks["Validation"]

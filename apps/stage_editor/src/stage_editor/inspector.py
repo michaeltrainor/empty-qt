@@ -1,8 +1,9 @@
 """Inspector: usdview's attribute, metadata, layer stack, and composition views.
 
 All four tabs follow one prim, set with :meth:`Inspector.set_prim_path`,
-and refresh when the document changes or time moves. Only variant
-selections are editable here; they go to the current edit target.
+and refresh when the document changes or time moves. Attribute values
+and variant selections are editable; edits go to the current edit target
+and can be undone.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
     QTimer,
+    Signal,
 )
 from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
@@ -42,6 +44,7 @@ from stage_editor.document import StageDocument
 from stage_editor.inspection import (
     PropertyRow,
     composition_rows,
+    format_value,
     metadata_rows,
     prim_index_text,
     prim_stack_rows,
@@ -51,6 +54,7 @@ from stage_editor.inspection import (
     spec_text,
     variant_rows,
 )
+from stage_editor.undo import parse_value
 
 _ModelIndex = QModelIndex | QPersistentModelIndex
 
@@ -76,11 +80,18 @@ class PropertyModel(QAbstractTableModel):
 
     Values are cached per row and cleared when time moves or the prim's
     properties change, so painting a large mesh does not re-read arrays.
+    Editing a Value cell writes the attribute to the edit target through
+    :meth:`StageDocument.set_attribute`, which is undoable.
+
+    Signals:
+        editMessage(str): Why an edit was refused or had no visible effect.
 
     Args:
         document: The document whose prims and time are shown.
         parent: Owning ``QObject``.
     """
+
+    editMessage = Signal(str)
 
     HEADERS = ("Name", "Type", "Value", "Source")
     NAME, TYPE, VALUE, SOURCE = range(4)
@@ -175,7 +186,67 @@ class PropertyModel(QAbstractTableModel):
             font = QFont()
             font.setItalic(row.custom or row.kind == "computed")
             return font
+        if role == Qt.ItemDataRole.EditRole and column == self.VALUE:
+            prim = self.prim()
+            if prim is None:
+                return ""
+            value = prim.GetAttribute(row.name).Get(Usd.TimeCode(self._document.time))
+            return format_value(value, limit=0)
         return None
+
+    def is_editable(self, row: int) -> bool:
+        """Return whether the Value cell of ``row`` accepts text edits.
+
+        Scalar, string, vector, colour, and quaternion attributes are
+        editable; arrays, matrices, relationships, computed rows, and
+        instance proxies are not.
+        """
+        prim = self.prim()
+        info = self.row_at(row)
+        if prim is None or info is None or info.kind != "attribute":
+            return False
+        if prim.IsInstanceProxy():
+            return False
+        type_name = prim.GetAttribute(info.name).GetTypeName()
+        try:
+            parse_value(type_name, format_value(type_name.defaultValue, limit=0))
+        except ValueError:
+            return False
+        return True
+
+    def flags(self, index: _ModelIndex) -> Qt.ItemFlag:
+        flags = super().flags(index)
+        if (
+            index.isValid()
+            and index.column() == self.VALUE
+            and self.is_editable(index.row())
+        ):
+            flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def setData(
+        self, index: _ModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole
+    ) -> bool:
+        if role != Qt.ItemDataRole.EditRole or not self.is_editable(index.row()):
+            return False
+        prim = self.prim()
+        row = self.row_at(index.row())
+        if prim is None or row is None:
+            return False
+        attr = prim.GetAttribute(row.name)
+        try:
+            parsed = parse_value(attr.GetTypeName(), str(value))
+        except ValueError as exc:
+            self.editMessage.emit(str(exc))
+            return False
+        if not self._document.set_attribute(str(attr.GetPath()), parsed):
+            self.editMessage.emit(
+                f"{row.name} was written to "
+                f"{self._document.edit_target_layer.GetDisplayName()}, "
+                "but a stronger layer's opinion still wins"
+            )
+        self.refresh_values()
+        return True
 
     def headerData(
         self,
@@ -224,10 +295,15 @@ class Inspector(QWidget):
       first; selecting one shows it as ``usda``.
     * **Composition**: the composition arcs, and the Pcp prim index dump.
 
+    Signals:
+        message(str): A status message, such as why an edit was refused.
+
     Args:
         document: The document to inspect.
         parent: Owning widget.
     """
+
+    message = Signal(str)
 
     def __init__(self, document: StageDocument, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -243,6 +319,7 @@ class Inspector(QWidget):
 
         # Properties
         self._properties = PropertyModel(document, self)
+        self._properties.editMessage.connect(self.message)
         self._table = QTableView(self)
         self._table.setModel(self._properties)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)

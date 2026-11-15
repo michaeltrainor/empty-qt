@@ -9,6 +9,10 @@ from pathlib import Path
 
 from pxr import Sdf, Tf, Usd, UsdGeom, UsdLux
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QUndoStack
+
+from stage_editor.inspection import format_value
+from stage_editor.undo import SdfEditCommand
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +121,8 @@ class StageDocument(QObject):
         self._edited = False
         self._time = 0.0
         self._source_map: tuple[Sdf.Path, Sdf.Path] | None = None
+        #: Undoable edits; cleared whenever the stage is replaced.
+        self.undo_stack = QUndoStack(self)
         # Tf holds Python callbacks weakly; these listeners live as long as self.
         self._layer_listeners = [
             Tf.Notice.RegisterGlobally(Sdf.Notice.LayersDidChange, self._on_layers),
@@ -509,14 +515,71 @@ class StageDocument(QObject):
             variant_set: Name of a variant set on the prim.
             selection: The variant to select; ``""`` clears the selection.
         """
-        prim = self.stage.GetPrimAtPath(path)
+        stage = self.stage
+        prim = stage.GetPrimAtPath(path)
         if not prim:
             return
-        variants = prim.GetVariantSets().GetVariantSet(variant_set)
-        if selection:
-            variants.SetVariantSelection(selection)
-        else:
-            variants.ClearVariantSelection()
+        target = stage.GetEditTarget()
+
+        def edit() -> None:
+            with Usd.EditContext(stage, target):
+                variants = prim.GetVariantSets().GetVariantSet(variant_set)
+                if selection:
+                    variants.SetVariantSelection(selection)
+                else:
+                    variants.ClearVariantSelection()
+
+        self.undo_stack.push(
+            SdfEditCommand(
+                f"Select {variant_set} = {selection or 'none'}",
+                target.GetLayer(),
+                [target.MapToSpecPath(prim.GetPath())],
+                edit,
+            )
+        )
+
+    def set_attribute(self, path: str, value: object) -> bool:
+        """Set an attribute in the current edit target, undoably.
+
+        An attribute with time samples gets a sample at the current time;
+        any other gets its default value.
+
+        Args:
+            path: Attribute path as a string, such as ``/World/Ball.radius``.
+            value: A value of the attribute's type.
+
+        Returns:
+            Whether the composed value is now ``value``; ``False`` means a
+            stronger layer's opinion still wins.
+
+        Raises:
+            ValueError: No attribute exists at ``path``.
+        """
+        stage = self.stage
+        attr = stage.GetAttributeAtPath(path)
+        if not attr:
+            msg = f"no attribute at {path}"
+            raise ValueError(msg)
+        time = (
+            Usd.TimeCode(self._time)
+            if attr.GetNumTimeSamples()
+            else Usd.TimeCode.Default()
+        )
+        target = stage.GetEditTarget()
+
+        def edit() -> None:
+            with Usd.EditContext(stage, target):
+                attr.Set(value, time)
+
+        self.undo_stack.push(
+            SdfEditCommand(
+                f"Set {attr.GetName()}",
+                target.GetLayer(),
+                [target.MapToSpecPath(attr.GetPath())],
+                edit,
+            )
+        )
+        return format_value(attr.Get(time)) == format_value(value)
 
     def set_dome_light(self, enabled: bool) -> None:
         """Add or remove a white dome light in the session layer.
@@ -560,6 +623,7 @@ class StageDocument(QObject):
             self._listener.Revoke()
         self._stage = stage
         self._path = path
+        self.undo_stack.clear()
         self._set_edited(False)
         start, _end = self.time_range()
         self._time = start
