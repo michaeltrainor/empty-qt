@@ -33,6 +33,7 @@ from stage_editor.display import (
 from stage_editor.document import USD_SUFFIXES, StageDocument
 from stage_editor.hydra_view import HydraView, hydra_available, stage_cameras
 from stage_editor.inspector import Inspector
+from stage_editor.layers import LayerPanel
 from stage_editor.outliner import Outliner
 
 FILE_FILTER = "USD files (" + " ".join(f"*{s}" for s in USD_SUFFIXES) + ")"
@@ -201,6 +202,9 @@ class StageEditorWindow(QMainWindow):
         inspector = self._add_dock(
             "Inspector", self.inspector, ads.DockWidgetArea.RightDockWidgetArea
         )
+        self.layers = LayerPanel(self.document, self)
+        self._add_dock("Layers", self.layers, None, beside=inspector)
+        inspector.setAsCurrentTab()
         self.timeline = TimelineBar(self)
         timeline = self._add_dock(
             "Timeline",
@@ -209,9 +213,11 @@ class StageEditorWindow(QMainWindow):
             no_tab=True,
         )
         timeline.setFeature(ads.CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
+        timeline.dockAreaWidget().setDockAreaFlag(
+            ads.CDockAreaWidget.eDockAreaFlag.HideSingleWidgetTitleBar, True
+        )
         container = outliner.dockAreaWidget()
         self.dock_manager.setSplitterSizes(container, [380, 800, 420])
-        del inspector
         self.playback = StagePlayback(self.document, self.timeline, self)
 
         self._status = QLabel(self)
