@@ -58,7 +58,7 @@ GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_UNPACK_ALIGNMENT = 0x0CF5
 
 PURPOSES = (UsdGeom.Tokens.default_, UsdGeom.Tokens.proxy, UsdGeom.Tokens.render)
-SELECTION_COLOR = (1.0, 0.8, 0.0, 1.0)
+SELECTION_COLOR = (1.0, 1.0, 0.0, 0.5)
 
 
 def hydra_available() -> bool:

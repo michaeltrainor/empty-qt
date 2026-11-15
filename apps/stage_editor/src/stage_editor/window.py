@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from mtqt import TimelineBar, apply_stylesheet, ensure_application
+from stage_editor.cli import build_parser, resolve_camera, split_paths
 from stage_editor.display import (
     AOVS,
     BACKGROUNDS,
@@ -29,6 +30,7 @@ from stage_editor.display import (
     DRAW_MODES,
     PICK_MODES,
     ViewSettings,
+    complexity_by_name,
 )
 from stage_editor.document import USD_SUFFIXES, StageDocument
 from stage_editor.hydra_view import HydraView, hydra_available, stage_cameras
@@ -644,6 +646,14 @@ class StageEditorWindow(QMainWindow):
         dock.toggleView(True)
         dock.setAsCurrentTab()
 
+    def select_paths(self, paths: list[str]) -> None:
+        """Select ``paths`` in the outliner, view, and inspector.
+
+        Args:
+            paths: Prim paths as strings.
+        """
+        self._select(paths)
+
     def _select(self, paths: list[str]) -> None:
         """Select ``paths`` everywhere, as if the user picked them."""
         self.outliner.set_selected_paths(paths)
@@ -695,14 +705,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Show the stage editor and run the Qt event loop.
 
     Args:
-        argv: Arguments after the program name; the first is opened.
+        argv: Arguments after the program name; see ``stage-editor --help``.
     """
+    args = build_parser().parse_args(list(sys.argv[1:] if argv is None else argv))
     app = ensure_application()
     window = StageEditorWindow()
     window.show()
-    args = list(sys.argv[1:] if argv is None else argv)
-    if args:
-        window.open_path(Path(args[0]))
+    if args.complexity or args.draw_mode:
+        settings = window.view.settings if window.view is not None else ViewSettings()
+        if args.complexity:
+            settings.complexity = complexity_by_name(args.complexity)
+        if args.draw_mode:
+            settings.draw_mode = f"DRAW_{args.draw_mode.upper()}"
+        window.apply_view_settings(settings)
+    if args.file is not None:
+        opened = window.open_path(
+            args.file, mask=split_paths(args.mask), load=not args.unloaded
+        )
+        document = window.document
+        if opened and args.frame is not None:
+            document.time = args.frame
+        if opened and args.select:
+            window.select_paths(
+                [document.map_source_path(p) for p in split_paths(args.select)]
+            )
+        if opened and args.camera and window.view is not None:
+            cameras = stage_cameras(document.stage)
+            camera = resolve_camera(cameras, document.map_source_path(args.camera))
+            camera = camera or resolve_camera(cameras, args.camera)
+            window.view.set_camera_path(camera)
     return app.exec()
 
 

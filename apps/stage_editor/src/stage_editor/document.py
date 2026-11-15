@@ -215,7 +215,8 @@ class StageDocument(QObject):
             referenced into a new untitled document instead.
 
         Raises:
-            ValueError: The file is not a USD layer or cannot be opened.
+            ValueError: The file is not a USD layer or cannot be opened, or a
+                mask entry is not an absolute prim path.
         """
         if not is_usd_file(path):
             msg = f"not a USD file: {path}"
@@ -223,6 +224,14 @@ class StageDocument(QObject):
         layer = Sdf.Layer.FindOrOpen(str(path))
         if layer is None:
             msg = f"cannot open {path}"
+            raise ValueError(msg)
+        bad = [
+            p
+            for p in mask
+            if not Sdf.Path.IsValidPathString(p) or not p.startswith("/")
+        ]
+        if bad:
+            msg = f"not absolute prim paths: {', '.join(bad)}"
             raise ValueError(msg)
         load_set = Usd.Stage.LoadAll if load else Usd.Stage.LoadNone
         if LAYER_MARKER in layer.customLayerData:
