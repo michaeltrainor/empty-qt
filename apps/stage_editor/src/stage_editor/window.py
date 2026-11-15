@@ -33,8 +33,10 @@ from stage_editor.display import (
 from stage_editor.document import USD_SUFFIXES, StageDocument
 from stage_editor.hydra_view import HydraView, hydra_available, stage_cameras
 from stage_editor.inspector import Inspector
+from stage_editor.interpreter import EditorApi, Interpreter
 from stage_editor.layers import LayerPanel
 from stage_editor.outliner import Outliner
+from stage_editor.validation import ValidationPanel
 
 FILE_FILTER = "USD files (" + " ".join(f"*{s}" for s in USD_SUFFIXES) + ")"
 SAVE_FILTER = "USD ASCII (*.usda);;USD binary (*.usdc);;USD (*.usd)"
@@ -220,6 +222,20 @@ class StageEditorWindow(QMainWindow):
         self.dock_manager.setSplitterSizes(container, [380, 800, 420])
         self.playback = StagePlayback(self.document, self.timeline, self)
 
+        self.validation = ValidationPanel(self.document, self)
+        self.validation.pathsSelected.connect(self._select)
+        validation = self._add_dock(
+            "Validation",
+            self.validation,
+            ads.DockWidgetArea.BottomDockWidgetArea,
+            target=central.dockAreaWidget(),
+        )
+        api = EditorApi(self.document, self.outliner.selected_paths, self._select)
+        self.interpreter = Interpreter(api, self)
+        self._add_dock("Interpreter", self.interpreter, None, beside=validation)
+        for name in ("Validation", "Interpreter"):
+            self.docks[name].toggleView(False)
+
         self._status = QLabel(self)
         status_bar = self.statusBar()
         assert status_bar is not None
@@ -241,6 +257,7 @@ class StageEditorWindow(QMainWindow):
         beside: Any = None,
         *,
         no_tab: bool = False,
+        target: Any = None,
     ) -> Any:
         """Add ``widget`` as a dock in ``area``, or as a tab beside dock ``beside``.
 
@@ -255,7 +272,7 @@ class StageEditorWindow(QMainWindow):
         if beside is not None:
             self.dock_manager.addDockWidgetTabToArea(dock, beside.dockAreaWidget())
         else:
-            self.dock_manager.addDockWidget(area, dock)
+            self.dock_manager.addDockWidget(area, dock, target)
         return dock
 
     # -- menus ----------------------------------------------------------------
@@ -367,6 +384,12 @@ class StageEditorWindow(QMainWindow):
         select = bar.addMenu("&Select")
         pick = select.addMenu("&Pick Mode")
         self._choice(pick, "pick_mode", PICK_MODES)
+
+        tools = bar.addMenu("&Tools")
+        self._action("&Validate Stage", "Ctrl+Shift+V", self._validate, tools)
+        self._action(
+            "Python &Interpreter", "Ctrl+Shift+I", self._show_interpreter, tools
+        )
 
         play = bar.addMenu("&Playback")
         self._action("Next Frame", "Right", lambda: self.playback.step(1), play)
@@ -609,6 +632,17 @@ class StageEditorWindow(QMainWindow):
         event.accept()
 
     # -- selection and view ---------------------------------------------------
+
+    def _validate(self) -> None:
+        dock = self.docks["Validation"]
+        dock.toggleView(True)
+        dock.setAsCurrentTab()
+        self.validation.run()
+
+    def _show_interpreter(self) -> None:
+        dock = self.docks["Interpreter"]
+        dock.toggleView(True)
+        dock.setAsCurrentTab()
 
     def _select(self, paths: list[str]) -> None:
         """Select ``paths`` everywhere, as if the user picked them."""
