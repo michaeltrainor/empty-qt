@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
-from pxr import Sdf, Tf, Usd, UsdGeom
+from pxr import Sdf, Tf, Usd, UsdGeom, UsdLux
 from PySide6.QtCore import QObject, Signal
 
 log = logging.getLogger(__name__)
@@ -16,6 +18,10 @@ USD_SUFFIXES: tuple[str, ...] = (".usd", ".usda", ".usdc", ".usdz")
 LAYER_MARKER = "stage_editor:version"
 LAYER_VERSION = 1
 ROOT = Sdf.Path("/World")
+#: Session-layer prims the editor authors for viewing (the dome light).
+#: The outliner hides this subtree.
+SESSION_ROOT = Sdf.Path("/_StageEditor")
+DOME_LIGHT = SESSION_ROOT.AppendChild("DomeLight")
 TIME_CODES_PER_SECOND = 24.0
 
 
@@ -28,13 +34,47 @@ def is_usd_file(path: Path) -> bool:
     return path.suffix.lower() in USD_SUFFIXES
 
 
+def _new_root_layer(up_axis: str = UsdGeom.Tokens.y, meters: float = 1.0) -> Sdf.Layer:
+    """Return an anonymous layer with a ``/World`` default prim and stage metadata."""
+    layer = Sdf.Layer.CreateAnonymous("untitled.usda")
+    Sdf.PrimSpec(layer, ROOT.name, Sdf.SpecifierDef, "Xform")
+    layer.defaultPrim = ROOT.name
+    layer.pseudoRoot.SetInfo(UsdGeom.Tokens.upAxis, up_axis)
+    layer.pseudoRoot.SetInfo(UsdGeom.Tokens.metersPerUnit, meters)
+    layer.timeCodesPerSecond = TIME_CODES_PER_SECOND
+    layer.framesPerSecond = TIME_CODES_PER_SECOND
+    data = dict(layer.customLayerData)
+    data[LAYER_MARKER] = LAYER_VERSION
+    layer.customLayerData = data
+    return layer
+
+
+def _reference_target(layer: Sdf.Layer, path: Path) -> Sdf.Path:
+    """Return the prim a reference to ``layer`` targets: default or first root.
+
+    Raises:
+        ValueError: The layer holds no prims.
+    """
+    if layer.defaultPrim:
+        return Sdf.Path.absoluteRootPath.AppendChild(layer.defaultPrim)
+    roots = layer.rootPrims
+    if not roots:
+        msg = f"no prims in {path}"
+        raise ValueError(msg)
+    return roots[0].path
+
+
 class StageDocument(QObject):
-    """One open scene: a ``Usd.Stage`` whose root layer is what Save writes.
+    """One open scene: a ``Usd.Stage`` whose root layer stack is what Save writes.
 
     A new document is an in-memory stage with a ``/World`` default prim.
     Opening a file the editor saved earlier edits that file in place. Any
     other USD file is foreign: it is referenced under ``/World`` of a new
     untitled document, so Save never overwrites someone else's asset.
+
+    View state that is never saved (visibility and active overrides, the
+    dome light) goes to the stage's session layer through
+    :meth:`session_edits`; edits there do not mark the document unsaved.
 
     The document relays ``Usd.Notice.ObjectsChanged`` as :attr:`changed`
     and owns the current time code, which the view and the timeline share.
@@ -44,6 +84,9 @@ class StageDocument(QObject):
         changed(list, list): Resynced prim paths and info-only changed
             paths, as strings, from one ``ObjectsChanged`` notice.
         timeChanged(float): The current time code moved.
+        dirtyChanged(bool): :meth:`has_unsaved_changes` flipped.
+        layersChanged(): A layer's dirtiness, muting, or the edit target
+            changed; the layer panel refreshes.
 
     Args:
         parent: Owning ``QObject``.
@@ -52,6 +95,8 @@ class StageDocument(QObject):
     stageReplaced = Signal()
     changed = Signal(list, list)
     timeChanged = Signal(float)
+    dirtyChanged = Signal(bool)
+    layersChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -60,6 +105,14 @@ class StageDocument(QObject):
         self._path: Path | None = None
         self._edited = False
         self._time = 0.0
+        self._source_map: tuple[Sdf.Path, Sdf.Path] | None = None
+        # Tf holds Python callbacks weakly; these listeners live as long as self.
+        self._layer_listeners = [
+            Tf.Notice.RegisterGlobally(Sdf.Notice.LayersDidChange, self._on_layers),
+            Tf.Notice.RegisterGlobally(
+                Sdf.Notice.LayerDirtinessChanged, self._on_dirtiness
+            ),
+        ]
         self.new()
 
     # -- state ----------------------------------------------------------------
@@ -81,7 +134,10 @@ class StageDocument(QObject):
         return self._path.name if self._path else "Untitled"
 
     def has_unsaved_changes(self) -> bool:
-        """Return whether the stage changed since the last new, open, or save."""
+        """Return whether the root layer stack changed since new, open, or save.
+
+        Session-layer edits do not count.
+        """
         return self._edited
 
     @property
@@ -107,25 +163,40 @@ class StageDocument(QObject):
         """Return the stage's time codes per second, never zero."""
         return self.stage.GetTimeCodesPerSecond() or TIME_CODES_PER_SECOND
 
+    def map_source_path(self, path: str) -> str:
+        """Map a path in an opened foreign file to its path on this stage.
+
+        A foreign file is referenced under ``/World``, so ``/Kitchen/Arch``
+        in the file is ``/World/Kitchen/Arch`` here. Paths of a scene this
+        editor saved, and paths outside the referenced prim, are returned
+        unchanged.
+
+        Args:
+            path: An absolute prim path as a string.
+        """
+        if self._source_map is None:
+            return path
+        source, target = self._source_map
+        sdf_path = Sdf.Path(path)
+        if not sdf_path.HasPrefix(source):
+            return path
+        return str(sdf_path.ReplacePrefix(source, target))
+
     # -- lifecycle ------------------------------------------------------------
 
     def new(self) -> None:
         """Replace the document with an empty untitled stage."""
-        stage = Usd.Stage.CreateInMemory()
-        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
-        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-        stage.SetTimeCodesPerSecond(TIME_CODES_PER_SECOND)
-        stage.SetFramesPerSecond(TIME_CODES_PER_SECOND)
-        world = UsdGeom.Xform.Define(stage, ROOT).GetPrim()
-        stage.SetDefaultPrim(world)
-        self._mark(stage.GetRootLayer())
-        self._bind(stage, None)
+        self._source_map = None
+        self._bind(Usd.Stage.Open(_new_root_layer()), None)
 
-    def open(self, path: Path) -> bool:
+    def open(self, path: Path, *, mask: Sequence[str] = (), load: bool = True) -> bool:
         """Open a USD file.
 
         Args:
             path: A ``.usd``, ``.usda``, ``.usdc``, or ``.usdz`` file.
+            mask: Prim paths to populate (``usdview --mask``); empty for all.
+                For a foreign file they are paths in that file.
+            load: Load payloads; ``False`` opens with everything unloaded.
 
         Returns:
             ``True`` when the file is a scene this editor saved and is now
@@ -142,16 +213,52 @@ class StageDocument(QObject):
         if layer is None:
             msg = f"cannot open {path}"
             raise ValueError(msg)
-        if LAYER_MARKER not in layer.customLayerData:
-            self.new()
-            self.add_reference(path)
-            return False
-        stage = Usd.Stage.Open(layer, Usd.Stage.LoadAll)
+        load_set = Usd.Stage.LoadAll if load else Usd.Stage.LoadNone
+        if LAYER_MARKER in layer.customLayerData:
+            self._source_map = None
+            stage = self._open_stage(layer, mask, load_set)
+            if stage is None:
+                msg = f"cannot compose {path}"
+                raise ValueError(msg)
+            self._bind(stage, path)
+            return True
+
+        target = _reference_target(layer, path)
+        info = layer.pseudoRoot
+        root = _new_root_layer(
+            info.GetInfo(UsdGeom.Tokens.upAxis)
+            if info.HasInfo(UsdGeom.Tokens.upAxis)
+            else UsdGeom.Tokens.y,
+            info.GetInfo(UsdGeom.Tokens.metersPerUnit)
+            if info.HasInfo(UsdGeom.Tokens.metersPerUnit)
+            else 1.0,
+        )
+        prim_path = ROOT.AppendChild(Tf.MakeValidIdentifier(path.stem))
+        spec = Sdf.CreatePrimInLayer(root, prim_path)
+        spec.specifier = Sdf.SpecifierOver
+        reference = Sdf.Reference(
+            str(path), Sdf.Path.emptyPath if layer.defaultPrim else target
+        )
+        spec.referenceList.Prepend(reference)
+        self._source_map = (target, prim_path)
+        mapped = [self.map_source_path(p) for p in mask]
+        stage = self._open_stage(root, mapped, load_set)
         if stage is None:
             msg = f"cannot compose {path}"
             raise ValueError(msg)
-        self._bind(stage, path)
-        return True
+        self._bind(stage, None)
+        self._adopt_time_range(layer)
+        return False
+
+    def _open_stage(
+        self, layer: Sdf.Layer, mask: Sequence[str], load_set: object
+    ) -> Usd.Stage | None:
+        if not mask:
+            return Usd.Stage.Open(layer, load_set)
+        population = Usd.StagePopulationMask()
+        for path in mask:
+            population.Add(Sdf.Path(path))
+        return Usd.Stage.OpenMasked(layer, population, load_set)
 
     def add_reference(self, path: Path, parent: Sdf.Path = ROOT) -> Sdf.Path:
         """Reference a USD file under ``parent`` and return the new prim's path.
@@ -171,16 +278,12 @@ class StageDocument(QObject):
         if layer is None:
             msg = f"cannot open {path}"
             raise ValueError(msg)
-        target = Sdf.Path.emptyPath
-        if not layer.defaultPrim:
-            roots = layer.rootPrims
-            if not roots:
-                msg = f"no prims in {path}"
-                raise ValueError(msg)
-            target = roots[0].path
+        target = _reference_target(layer, path)
         prim_path = self._unique_child(parent, Tf.MakeValidIdentifier(path.stem))
         prim = self.stage.OverridePrim(prim_path)
-        prim.GetReferences().AddReference(str(path), target)
+        prim.GetReferences().AddReference(
+            str(path), Sdf.Path.emptyPath if layer.defaultPrim else target
+        )
         self._adopt_time_range(layer)
         return prim_path
 
@@ -206,15 +309,17 @@ class StageDocument(QObject):
         self.timeChanged.emit(start)
 
     def save(self) -> None:
-        """Write the root layer to :attr:`path`.
+        """Write the root layer and any dirty sublayers it owns.
 
         Raises:
             ValueError: The document is untitled; use :meth:`save_as`.
         """
         if self._path is None:
             raise ValueError("untitled document; use save_as")
-        self.stage.GetRootLayer().Save()
-        self._edited = False
+        for layer in self.stage.GetLayerStack(includeSessionLayers=False):
+            if layer.dirty and not layer.anonymous:
+                layer.Save()
+        self._set_edited(False)
 
     def save_as(self, path: Path) -> None:
         """Write the document to ``path`` and keep editing that file.
@@ -235,6 +340,180 @@ class StageDocument(QObject):
             raise ValueError(msg)
         self.open(path)
 
+    # -- layers ---------------------------------------------------------------
+
+    @property
+    def edit_target_layer(self) -> Sdf.Layer:
+        """The layer that edits go to."""
+        return self.stage.GetEditTarget().GetLayer()
+
+    def set_edit_target(self, layer: Sdf.Layer) -> None:
+        """Send edits to ``layer``, a layer of the stage's local layer stack.
+
+        Args:
+            layer: The session layer, the root layer, or one of its sublayers.
+
+        Raises:
+            ValueError: ``layer`` is not in the local layer stack.
+        """
+        stage = self.stage
+        if layer not in stage.GetLayerStack(includeSessionLayers=True):
+            msg = f"{layer.identifier} is not in the stage's layer stack"
+            raise ValueError(msg)
+        stage.SetEditTarget(Usd.EditTarget(layer))
+        self.layersChanged.emit()
+
+    def set_layer_muted(self, layer: Sdf.Layer, muted: bool) -> None:
+        """Mute or unmute ``layer``; the root and session layers cannot be muted.
+
+        Args:
+            layer: Any layer the stage uses.
+            muted: The new state.
+
+        Raises:
+            ValueError: ``layer`` is the root or session layer.
+        """
+        stage = self.stage
+        if layer in (stage.GetRootLayer(), stage.GetSessionLayer()):
+            raise ValueError("the root and session layers cannot be muted")
+        if muted:
+            stage.MuteLayer(layer.identifier)
+        else:
+            stage.UnmuteLayer(layer.identifier)
+        self.layersChanged.emit()
+
+    # -- session overrides ------------------------------------------------------
+
+    @contextmanager
+    def session_edits(self) -> Iterator[Usd.Stage]:
+        """Send edits made inside the block to the session layer.
+
+        Yields:
+            The stage.
+        """
+        stage = self.stage
+        with Usd.EditContext(stage, stage.GetSessionLayer()):
+            yield stage
+
+    def _prims(self, paths: Sequence[str]) -> list[Usd.Prim]:
+        stage = self.stage
+        prims = [stage.GetPrimAtPath(p) for p in paths]
+        return [p for p in prims if p and p.IsValid()]
+
+    def set_visible(self, paths: Sequence[str], visible: bool) -> None:
+        """Show or hide prims with a session-layer visibility override.
+
+        Args:
+            paths: Prim paths as strings; non-imageable prims are skipped.
+            visible: ``True`` makes each prim and its ancestors visible.
+        """
+        with self.session_edits():
+            for prim in self._prims(paths):
+                imageable = UsdGeom.Imageable(prim)
+                if not imageable:
+                    continue
+                if visible:
+                    imageable.MakeVisible()
+                else:
+                    imageable.MakeInvisible()
+
+    def show_only(self, paths: Sequence[str]) -> None:
+        """Hide every root prim, then make ``paths`` visible (usdview "Vis Only").
+
+        Args:
+            paths: Prim paths as strings.
+        """
+        stage = self.stage
+        roots = [
+            str(p.GetPath())
+            for p in stage.GetPseudoRoot().GetChildren()
+            if p.GetPath() != SESSION_ROOT
+        ]
+        self.set_visible(roots, False)
+        self.set_visible(paths, True)
+
+    def set_active(self, paths: Sequence[str], active: bool) -> None:
+        """Activate or deactivate prims with a session-layer override.
+
+        Args:
+            paths: Prim paths as strings.
+            active: The new state.
+        """
+        with self.session_edits():
+            for prim in self._prims(paths):
+                prim.SetActive(active)
+
+    def clear_session_overrides(self, paths: Sequence[str]) -> None:
+        """Remove session-layer visibility and active opinions at and below paths.
+
+        Args:
+            paths: Prim paths as strings.
+        """
+        session = self.stage.GetSessionLayer()
+        specs: list[Sdf.PrimSpec] = []
+
+        def collect(path: Sdf.Path) -> None:
+            if path.IsPrimPath():
+                spec = session.GetPrimAtPath(path)
+                if spec is not None:
+                    specs.append(spec)
+
+        for path in paths:
+            if session.GetPrimAtPath(path) is not None:
+                session.Traverse(Sdf.Path(path), collect)
+        with Sdf.ChangeBlock():
+            for spec in specs:
+                if "visibility" in spec.properties:
+                    spec.RemoveProperty(spec.properties["visibility"])
+                if spec.HasInfo("active"):
+                    spec.ClearInfo("active")
+
+    def load(self, paths: Sequence[str], load: bool = True) -> None:
+        """Load or unload payloads at and below ``paths``.
+
+        Args:
+            paths: Prim paths as strings.
+            load: ``False`` unloads.
+        """
+        sdf_paths = [Sdf.Path(p) for p in paths]
+        if load:
+            self.stage.LoadAndUnload(sdf_paths, [])
+        else:
+            self.stage.LoadAndUnload([], sdf_paths)
+
+    def set_variant(self, path: str, variant_set: str, selection: str) -> None:
+        """Select a variant on the prim at ``path`` in the current edit target.
+
+        Args:
+            path: Prim path as a string.
+            variant_set: Name of a variant set on the prim.
+            selection: The variant to select; ``""`` clears the selection.
+        """
+        prim = self.stage.GetPrimAtPath(path)
+        if not prim:
+            return
+        variants = prim.GetVariantSets().GetVariantSet(variant_set)
+        if selection:
+            variants.SetVariantSelection(selection)
+        else:
+            variants.ClearVariantSelection()
+
+    def set_dome_light(self, enabled: bool) -> None:
+        """Add or remove a white dome light in the session layer.
+
+        Args:
+            enabled: Whether the light exists.
+        """
+        stage = self.stage
+        exists = bool(stage.GetPrimAtPath(DOME_LIGHT))
+        if enabled == exists:
+            return
+        with self.session_edits():
+            if enabled:
+                UsdLux.DomeLight.Define(stage, DOME_LIGHT)
+            else:
+                stage.RemovePrim(SESSION_ROOT)
+
     # -- internals ------------------------------------------------------------
 
     def _mark(self, layer: Sdf.Layer) -> None:
@@ -251,12 +530,17 @@ class StageDocument(QObject):
             candidate = parent.AppendChild(f"{stem}_{suffix}")
         return candidate
 
+    def _set_edited(self, edited: bool) -> None:
+        if edited != self._edited:
+            self._edited = edited
+            self.dirtyChanged.emit(edited)
+
     def _bind(self, stage: Usd.Stage, path: Path | None) -> None:
         if self._listener is not None:
             self._listener.Revoke()
         self._stage = stage
         self._path = path
-        self._edited = False
+        self._set_edited(False)
         start, _end = self.time_range()
         self._time = start
         self._listener = Tf.Notice.Register(
@@ -265,10 +549,22 @@ class StageDocument(QObject):
         self.stageReplaced.emit()
         self.timeChanged.emit(self._time)
 
+    def _on_layers(self, notice: Sdf.Notice.LayersDidChange, _sender: object) -> None:
+        if self._stage is None or self._edited:
+            return
+        local = {
+            layer.identifier
+            for layer in self._stage.GetLayerStack(includeSessionLayers=False)
+        }
+        if any(layer.identifier in local for layer in notice.GetLayers()):
+            self._set_edited(True)
+
+    def _on_dirtiness(self, _notice: object, _sender: object) -> None:
+        self.layersChanged.emit()
+
     def _on_objects_changed(
         self, notice: Usd.Notice.ObjectsChanged, _sender: Usd.Stage
     ) -> None:
         resynced = [str(p) for p in notice.GetResyncedPaths()]
         info = [str(p) for p in notice.GetChangedInfoOnlyPaths()]
-        self._edited = True
         self.changed.emit(resynced, info)

@@ -43,3 +43,50 @@ def test_model_mirrors_prims_and_follows_edits(qtbot) -> None:
     document.new()
     assert _names(model) == ["World"]
     assert outliner.selected_paths() == []
+
+
+def test_filters_and_session_overrides(qtbot) -> None:
+    document = StageDocument()
+    outliner = Outliner(document)
+    qtbot.addWidget(outliner)
+    model = outliner.model
+    stage = document.stage
+    UsdGeom.Cube.Define(stage, "/World/A")
+    UsdGeom.Cube.Define(stage, "/World/B")
+    stage.OverridePrim("/World/Over")
+    stage.CreateClassPrim("/_Class")
+    document._set_edited(False)
+
+    # Session overrides change what is drawn but never mark the scene unsaved.
+    document.show_only(["/World/A"])
+    assert model.is_visible("/World/A")
+    assert not model.is_visible("/World/B")
+    document.set_active(["/World/B"], False)
+    document.set_dome_light(True)
+    assert not document.has_unsaved_changes()
+    assert stage.GetRootLayer().GetPrimAtPath("/World/B") is not None
+    assert not stage.GetRootLayer().GetPrimAtPath("/World/B").HasInfo("active")
+    assert not model.index_for_path("/_StageEditor").isValid()
+
+    # Inactive prims list by default; overs and classes only when asked.
+    assert model.index_for_path("/World/B").isValid()
+    assert not model.index_for_path("/World/Over").isValid()
+    assert not model.index_for_path("/_Class").isValid()
+    prim_filter = model.filter
+    prim_filter.inactive = False
+    prim_filter.undefined = prim_filter.abstract = True
+    model.set_filter(prim_filter)
+    assert not model.index_for_path("/World/B").isValid()
+    assert model.index_for_path("/World/Over").isValid()
+    assert model.index_for_path("/_Class").isValid()
+
+    document.clear_session_overrides(["/World"])
+    assert model.is_visible("/World/B")
+    assert stage.GetPrimAtPath("/World/B").IsActive()
+
+    # Search keeps matches and their ancestors; selection maps through it.
+    outliner.set_search("b")
+    outliner.set_selected_paths(["/World/B"])
+    assert outliner.selected_paths() == ["/World/B"]
+    UsdGeom.Xform.Define(stage, "/World/C")  # a rebuild keeps the selection
+    assert outliner.selected_paths() == ["/World/B"]
