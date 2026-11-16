@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
-from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, QObject, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QKeyCombination,
+    QMimeData,
+    QObject,
+    QSize,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -54,6 +62,7 @@ from scene_viewport.components import (
 from scene_viewport.export_gltf import export_scene
 from scene_viewport.gizmo import InteractionTool
 from scene_viewport.history import HistoryStep, SceneHistory, SceneObjects
+from scene_viewport.icons import IconName, tool_icon
 from scene_viewport.mesh.importer import (
     IMPORT_SUFFIXES,
     ModelImportError,
@@ -546,18 +555,22 @@ class SceneViewportWindow(QMainWindow):
         toolbar.setObjectName("SceneViewportToolbar")
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
+        # Square icon-only buttons as in Maya's Tool Box; the label and hotkey
+        # stay in the tooltip.
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setIconSize(QSize(22, 22))
         self.addToolBar(toolbar)
 
         tool_group = QActionGroup(self)
         tool_group.setExclusive(True)
-        tool_specs: list[tuple[InteractionTool, str, str]] = [
-            ("select", "Select", "Q"),
-            ("translate", "Move", "W"),
-            ("rotate", "Rotate", "E"),
-            ("scale", "Scale", "R"),
+        tool_specs: list[tuple[InteractionTool, str, str, IconName]] = [
+            ("select", "Select", "Q", "select"),
+            ("translate", "Move", "W", "move"),
+            ("rotate", "Rotate", "E", "rotate"),
+            ("scale", "Scale", "R", "scale"),
         ]
-        for tool, label, shortcut in tool_specs:
-            action = QAction(label, self)
+        for tool, label, shortcut, icon in tool_specs:
+            action = QAction(tool_icon(icon), label, self)
             action.setCheckable(True)
             action.setShortcut(QKeySequence(shortcut))
             action.setToolTip(f"{label} ({shortcut})")
@@ -579,7 +592,7 @@ class SceneViewportWindow(QMainWindow):
         space_group.setExclusive(True)
         spaces: tuple[tuple[Space, str], ...] = (("world", "World"), ("local", "Local"))
         for space, label in spaces:
-            action = QAction(label, self)
+            action = QAction(tool_icon(space), label, self)
             action.setCheckable(True)
             action.setToolTip(f"Edit in {label.lower()} space")
 
@@ -593,7 +606,7 @@ class SceneViewportWindow(QMainWindow):
         self._space_actions[self._edit_space].setChecked(True)
 
         toolbar.addSeparator()
-        pivot_action = QAction("Edit Pivot", self)
+        pivot_action = QAction(tool_icon("pivot"), "Edit Pivot", self)
         pivot_action.setCheckable(True)
         pivot_action.setShortcut(QKeySequence("D"))
         pivot_action.setToolTip("Affect pivot only (D)")
@@ -601,7 +614,7 @@ class SceneViewportWindow(QMainWindow):
         toolbar.addAction(pivot_action)
         self._pivot_action = pivot_action
 
-        snap_action = QAction("Snap", self)
+        snap_action = QAction(tool_icon("snap"), "Snap", self)
         snap_action.setCheckable(True)
         snap_action.setShortcut(QKeySequence("X"))
         snap_action.setToolTip(
