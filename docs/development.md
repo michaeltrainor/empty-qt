@@ -47,7 +47,7 @@ uv run --package scene-viewport scene-viewport
 
 Maya-style tools via `MayaTransformGizmo` (`apps/scene_viewport/src/scene_viewport/gizmo.py`), wrapping `pygfx.TransformGizmo`:
 
-- **Tools** (toolbar + hotkeys): **Q** select, **W** move, **E** rotate, **R** scale; **D** edit pivot (affect pivot only).
+- **Tools** (toolbar + hotkeys): **Q** select, **W** move, **E** rotate, **R** scale; **D** edit pivot (affect pivot only). The toolbar shows square icon buttons like Maya's Tool Box (SVG files in `scene_viewport/icons/`, loaded by `scene_viewport/icons.py`); hover for the name and hotkey.
 - **Handles**: as in Maya, you can grab anywhere on an axis line, not only its tip, to move along it (or scale, with the scale tool). An invisible 12px strip over each line takes the pick. Axis and plane moves stay exactly on the axis or plane under a perspective camera; stock pygfx let an X drag drift in Y.
 - **Scale**: the viewport builds one `gfx.Mesh` per mesh and nothing else up front. Selection outlines, wire-on-shaded overlays, and bounding boxes are created the first time a mesh needs one and share one material each, so opening the Pixar Kitchen set (1788 meshes, 537k triangles) takes about 15 s instead of two minutes. Drawing is still one draw call per mesh plus a shadow pass over every caster, about 4 fps at that size; batching meshes by material is the planned fix.
 - **Shading** (**1**–**6**): bounding box, wireframe on shaded, flat, wireframe, shaded, textured (an imported model's base color texture, or the Mesh tab's `albedo_map`, which wins when set).
