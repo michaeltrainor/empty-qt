@@ -1,7 +1,7 @@
 # USD-centric architecture (plan)
 
 Status: proposal, 2026-11-07; build spike passed 2026-11-14 (see [Build spike
-results](#build-spike-results)). Not implemented. The scene viewport today is a
+results](#build-spike-results)); step 2 started in `apps/stage_editor`. The scene viewport today is a
 component store (`SceneWorld`) mirrored onto a live `Usd.Stage` and drawn by
 pygfx; USD files are read as model files through
 `scene_viewport/mesh/usd_reader.py`. This page records the rethink that came
@@ -93,7 +93,9 @@ the pygfx viewport and its gizmo, snapshot undo.
    `QOpenGLWidget`, pick a prim, measure load time and fps. Go or no-go, and
    it defines what CI must cache per platform. Done, go (results below).
 2. New app package beside the old one: stage document, Hydra view, outliner,
-   until it reaches parity on the hand-test list.
+   until it reaches parity on the hand-test list. Started as `apps/stage_editor`:
+   `StageDocument` (new, open, reference, save, time, change notices),
+   `HydraView`, `Outliner`, a timeline on stage time, and the File menu.
 3. Attribute panel, undo, gizmo as guide prims, converters; then retire the
    old viewport.
 

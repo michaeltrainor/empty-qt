@@ -1,0 +1,20 @@
+[project]
+name = "stage-editor"
+version = "0.1.0"
+description = "USD stage editor built on mtqt and Hydra Storm. Not published."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "mtqt",
+    "usd-core>=26.11",
+]
+classifiers = ["Private :: Do Not Upload"]
+
+[project.scripts]
+stage-editor = "stage_editor.window:main"
+
+[tool.uv.sources]
+mtqt = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
