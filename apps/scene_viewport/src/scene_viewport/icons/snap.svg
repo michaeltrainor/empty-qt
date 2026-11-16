@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <!-- magnet -->
+  <path d="M6 13.5 V9 a6 6 0 0 1 12 0 v4.5" stroke="#dadada" stroke-width="3.2"/>
+  <path d="M6 13.5 V17.5 H9.4 V13.5 M18 13.5 V17.5 H14.6 V13.5" stroke="#dadada" stroke-width="1.4"/>
+  <path d="M4.4 13.5 H11 M13 13.5 H19.6" stroke="#e5484d" stroke-width="1.4"/>
+  <path d="M4.4 17.5 H11 M13 17.5 H19.6" stroke="#4c8dff" stroke-width="1.4"/>
+  <!-- grid dots the magnet snaps to -->
+  <path d="M4 21.5 H20" stroke="#dadada" stroke-width="1.2" stroke-dasharray="1.2 2.8"/>
+</svg>
