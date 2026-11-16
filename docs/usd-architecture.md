@@ -1,6 +1,7 @@
 # USD-centric architecture (plan)
 
-Status: proposal, 2026-11-07. Not implemented. The scene viewport today is a
+Status: proposal, 2026-11-07; build spike passed 2026-11-14 (see [Build spike
+results](#build-spike-results)). Not implemented. The scene viewport today is a
 component store (`SceneWorld`) mirrored onto a live `Usd.Stage` and drawn by
 pygfx; USD files are read as model files through
 `scene_viewport/mesh/usd_reader.py`. This page records the rethink that came
@@ -90,8 +91,55 @@ the pygfx viewport and its gizmo, snapshot undo.
 1. Build spike: OpenUSD with imaging against Python 3.13 and PySide6, Windows
    first. Render the Kitchen set and the walking HumanFemale in a
    `QOpenGLWidget`, pick a prim, measure load time and fps. Go or no-go, and
-   it defines what CI must cache per platform.
+   it defines what CI must cache per platform. Done, go (results below).
 2. New app package beside the old one: stage document, Hydra view, outliner,
    until it reaches parity on the hand-test list.
 3. Attribute panel, undo, gizmo as guide prims, converters; then retire the
    old viewport.
+
+## Build spike results
+
+Run on 2026-11-14 on Windows 11, an RTX 3080 Ti (OpenGL 4.6), 32 cores.
+`scripts/build_usd_imaging.cmd` builds OpenUSD v26.11.1 with `--usd-imaging
+--python --materialx` against the repository's `.venv` interpreter (uv's
+CPython 3.13.14, which ships headers and the import library). The build took
+13 minutes, two of them for oneTBB, OpenSubdiv, and MaterialX; the install is
+about 80 DLLs plus a `pxr` package in `inst\Lib\site-packages`. No PyPI wheel
+covers this: `usd-core` 26.11 and the newer `pxr-usd` 26.8 are both core only.
+
+`scripts/hydra_spike.py` is the prototype: a `QOpenGLWidget` hosting
+`UsdImagingGL.Engine` the way usdview's `StageView` does (render buffer size,
+framing, camera state, `Glf.SimpleLight` lighting, the `color` AOV), with an
+orbit camera, click picking through `TestIntersection`, stage-time playback,
+and `--bench N` / `--screenshot` flags. Only `HdStormRendererPlugin` is
+registered. Numbers from `--bench`, window 1280x800:
+
+| Stage | Prims / meshes | Stage open | First image | `Render()` mean | Playback | Pick |
+| --- | --- | --- | --- | --- | --- | --- |
+| Kitchen set | 2742 / 1788 | 0.12 s | 0.2 to 0.6 s | 1.5 ms | 119 fps (vsync) | 21 ms |
+| HumanFemale.walk (UsdSkel) | 1452 / 89 | 0.10 s | 0.6 to 1.7 s | 7.5 ms | 105 fps | 32 ms |
+
+The pygfx viewport drew the Kitchen set at about 4 fps after a 15 s load. The
+skinned walk cycle plays with no app code: UsdSkel is resolved by imaging.
+First-image time varies between runs with Storm's shader cache.
+
+Things the prototype had to get right, for step 2:
+
+- Destroy the engine while the GL context is current (`makeCurrent()` in an
+  `aboutToQuit` slot). Letting Python drop it after the context is gone
+  prints an `HgiGL` error per texture and sampler.
+- A `Glf.SimpleLight` dome light without a texture warns on every frame; the
+  spike uses a camera light only. The real view should author a `DomeLight`
+  prim in the session layer instead.
+- `TestIntersection(PickParams, ...)` returns a list of `IntersectionResult`
+  objects (`hitPrimPath`, `hitInstanceIndex`), not the legacy tuple.
+- `--imaging` in `build_usd.py` means Hd without UsdImaging; `--usd-imaging`
+  is the full set. usdview needs PyOpenGL in the build interpreter, so it is
+  skipped; the viewer gets PyOpenGL from `uv run --with PyOpenGL`.
+- With `PYTHONPATH` pointing at the install, the built `pxr` shadows the
+  `usd-core` wheel in `.venv`; the two must never be mixed in one process.
+
+CI consequence: the Windows job needs a cached `inst\` keyed on the OpenUSD
+tag, the MSVC version, and the Python version, or the Hydra tests stay
+Windows-local until that cache exists. Linux and macOS builds are not tried
+yet.
