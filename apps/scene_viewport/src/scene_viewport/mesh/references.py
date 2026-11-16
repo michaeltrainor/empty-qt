@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import struct
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -56,8 +57,10 @@ def referenced_files(path: Path) -> tuple[Path, ...]:
     """Return the external files ``path`` refers to.
 
     glTF (``.gltf`` and ``.glb``) buffer and image URIs and OBJ material
-    libraries with their texture maps are listed. Embedded data, remote
-    URIs (see :func:`remote_references`), and other formats have none.
+    libraries with their texture maps are listed, and for a USD stage its
+    other layers (sublayers, references, payloads) and texture files.
+    Embedded data, remote URIs (see :func:`remote_references`), and other
+    formats have none.
 
     Each material library is scanned on its own timestamp, so a texture
     added to an edited ``.mtl`` shows up without touching the ``.obj``.
@@ -93,8 +96,20 @@ def remote_references(path: Path) -> tuple[str, ...]:
     return () if scan is None else scan.remote
 
 
+#: How long a computed signature is reused, in seconds. A scene with
+#: thousands of meshes from one file asks for its signature once per mesh;
+#: a USD stage can refer to hundreds of files, so each answer would cost
+#: hundreds of ``stat`` calls.
+SIGNATURE_TTL = 1.0
+_signatures: dict[Path, tuple[float, tuple[FileStamp, ...]]] = {}
+
+
 def source_signature(path: Path) -> tuple[FileStamp, ...]:
     """Stamp ``path`` and the files it refers to, to notice any edit.
+
+    The answer is reused for :data:`SIGNATURE_TTL` seconds, so a batch of
+    meshes from one file stamps it once. Call :func:`forget_signatures`
+    first when a fresh look matters, as the reload-on-activation does.
 
     Args:
         path: Model file.
@@ -102,7 +117,18 @@ def source_signature(path: Path) -> tuple[FileStamp, ...]:
     Returns:
         One ``(path, mtime_ns, size)`` per file, the model file first.
     """
-    return tuple(file_stamp(file) for file in (path, *referenced_files(path)))
+    now = time.monotonic()
+    cached = _signatures.get(path)
+    if cached is not None and now - cached[0] < SIGNATURE_TTL:
+        return cached[1]
+    signature = tuple(file_stamp(file) for file in (path, *referenced_files(path)))
+    _signatures[path] = (now, signature)
+    return signature
+
+
+def forget_signatures() -> None:
+    """Drop every reused signature, so the next call stats the files again."""
+    _signatures.clear()
 
 
 def reference_problems(path: Path) -> list[str]:
@@ -176,6 +202,11 @@ def _scan(path: Path, _mtime_ns: int, _size: int) -> _Scan:
         if suffix == ".obj":
             libraries = tuple(dict.fromkeys(_obj_libraries(path)))
             return _Scan(files=libraries, libraries=libraries)
+        if suffix in (".usd", ".usda", ".usdc", ".usdz"):
+            # Imported here: this module stays free of pxr for the other formats.
+            from scene_viewport.mesh.usd_reader import stage_files
+
+            return _Scan(files=stage_files(path))
     except (OSError, ValueError):
         # Unreadable or malformed: loading reports the real error.
         pass

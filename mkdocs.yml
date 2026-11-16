@@ -19,6 +19,8 @@ nav:
   - Style: style.md
   - Embedding: embedding.md
   - Development: development.md
+  - Stage editor: stage-editor.md
+  - USD architecture (plan): usd-architecture.md
   - API: api.md
 
 plugins:

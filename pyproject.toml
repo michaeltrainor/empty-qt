@@ -29,7 +29,7 @@ keywords = ["pyside6", "qt", "widgets", "models", "vfx"]
 default-groups = ["dev", "docs"]
 
 [tool.uv.workspace]
-members = ["apps/scene_viewport"]
+members = ["apps/scene_viewport", "apps/stage_editor"]
 
 [project.urls]
 Homepage = "https://github.com/michaeltrainor/empty-qt"
@@ -52,7 +52,7 @@ build-backend = "uv_build"
 
 [tool.ruff]
 target-version = "py313"
-src = ["src", "tests", "examples", "apps/scene_viewport/src"]
+src = ["src", "tests", "examples", "apps/scene_viewport/src", "apps/stage_editor/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "D", "B", "C4", "SIM", "RUF", "PT", "T20"]
@@ -62,6 +62,8 @@ ignore = ["D102", "D104", "D105", "D107", "D203", "D213", "D401", "D413"]
 "tests/**" = ["D"]
 "examples/**" = ["D", "T20"]
 "apps/**" = ["D", "T20"]
+# Developer scripts report on stdout.
+"scripts/**" = ["T20"]
 # Claude Code hooks report to Claude on stderr.
 ".claude/hooks/**" = ["T20"]
 
@@ -74,7 +76,7 @@ convention = "google"
 
 [tool.pytest.ini_options]
 qt_api = "pyside6"
-testpaths = ["tests", "apps/scene_viewport/tests"]
+testpaths = ["tests", "apps/scene_viewport/tests", "apps/stage_editor/tests"]
 addopts = "--import-mode=importlib --cov=mtqt --cov-report=term-missing"
 qt_log_level_fail = "WARNING"
 # Offscreen platform noise: fonts not installed here, and a missing plugin call.
@@ -92,7 +94,7 @@ branch = true
 exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
 
 [tool.pyright]
-include = ["src", "apps/scene_viewport/src"]
+include = ["src", "apps/scene_viewport/src", "apps/stage_editor/src"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
 venvPath = "."

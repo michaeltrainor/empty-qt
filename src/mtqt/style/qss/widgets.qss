@@ -197,14 +197,21 @@ PropertiesPanel QDoubleSpinBox[invalid="true"] {
     padding: 6px 10px;
 }
 
+/* Icon-only buttons: 22px icon + 5px padding + 1px border = 34px square.
+   The active tool is a raised square with an accent edge, as in Maya's Tool
+   Box, so the coloured axis icons stay readable. */
 #SceneViewportToolbar QToolButton {
-    padding: 6px 12px;
-    font-weight: 500;
+    padding: 5px;
+    border-radius: 5px;
 }
 
 #SceneViewportToolbar QToolButton:checked {
-    background-color: #4c8dff;
-    color: #ffffff;
+    background-color: #4a4a4a;
+    border-color: #4c8dff;
+}
+
+#SceneViewportToolbar QToolButton:checked:hover {
+    background-color: #565656;
 }
 
 #SceneViewportSplitter::handle {

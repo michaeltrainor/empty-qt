@@ -18,6 +18,78 @@
 - `RangeSlider`: horizontal dual-handle slider. The host sets bounds and
   values without a signal. A drag emits `rangeChanged` with the lower and
   upper values. Example in `examples/range_slider.py`.
+- Stage editor: editing. Every open stage is a tab, laid out like the
+  scene viewport (tree and layers left, inspector right, timeline below).
+  A Move/Rotate/Scale gizmo
+  writes the prim's own transform ops; the Create menu adds shapes,
+  lights, cameras, and MaterialX `standard_surface` materials; prims can
+  be renamed, reparented by dragging, duplicated, grouped, deleted (or
+  deactivated when they come from a referenced file), and bound to
+  materials. Layer > Eject to Layer moves a prim into
+  `<scene>_assets/<Name>.usda`, references it back in place, and opens it
+  in its own tab; edits there show in the scene at once, and Merge Back
+  folds it back. Every edit can be undone.
+- Stage editor: usdview-style tooling. The panel sizes and view settings
+  are remembered. The Display menu sets draw mode,
+  complexity, purposes, lights, AOV, background, selection bounds, and a
+  HUD; the Camera menu looks through stage cameras; the pick mode
+  selects prims, models, or instances. The outliner gains type and
+  visibility columns, usdview's colours, filters, search, and a context
+  menu whose visibility, active, and payload changes go to the session
+  layer. A new inspector shows properties with their value sources,
+  metadata and variants, the layer stack, and composition arcs. Attribute
+  values and variant selections can be edited and undone. A layers panel
+  sets the edit target, mutes layers, and shows them as usda. Tools add a
+  UsdValidation panel (usdchecker's checks, with fixers) and a Python
+  console. New flags follow usdview: `--camera`, `--unloaded`, `--mask`,
+  `--complexity`, `--draw-mode`, `--select`, and `--cf`. See the new
+  Stage editor docs page.
+- Stage editor: a new `apps/stage_editor` app where the OpenUSD stage is
+  the document and Hydra Storm draws it. New, Open, Save, and Save As
+  work on USD files; a USD file from another tool is referenced into a
+  new untitled scene instead of edited, and Add Reference composes more
+  files. It has an outliner over the prims, click picking, Frame
+  Selection and Frame All, and a timeline that plays stage time. Run it
+  with `uv run --package stage-editor stage-editor`; the view needs the
+  imaging build from `scripts/build_usd_imaging.cmd` on `PYTHONPATH`.
+- Development: `scripts/build_usd_imaging.cmd` builds OpenUSD 26.11 with
+  Hydra Storm against the repository's `.venv` Python, and
+  `scripts/hydra_spike.py` draws a USD stage with `UsdImagingGL` in a
+  `QOpenGLWidget` with picking, playback, and a benchmark flag. The
+  spike results are recorded in the USD architecture page.
+- Scene viewport: OpenUSD files open and import as models. `.usd`,
+  `.usda`, `.usdc`, and `.usdz` stages from other tools (for example the
+  UsdSkel examples) are read like glTF: their `Mesh` prims (polygons
+  triangulated, holes and orientation honoured, face-varying UVs),
+  `UsdPreviewSurface` materials with their textures (base color, normal,
+  emissive, occlusion, roughness and metallic), `displayColor`, lights,
+  cameras, and visibility come through, and the stage's up axis and
+  units convert the model when Import Up Axis / Units are Auto. Opening
+  such a file starts a new untitled scene, so Save never overwrites it;
+  scenes this app saved still open in place. Skinning and blend shapes
+  are not applied yet (rest pose, with a warning), and subdivision
+  surfaces are drawn as their control mesh.
+- Scene viewport: large scenes open much faster. The Pixar Kitchen set
+  (1788 meshes) opens in about 15 s instead of two minutes: model files
+  are stamped for changes once per second instead of once per mesh, a
+  mesh from a USD file is referenced on the live stage instead of having
+  its triangles copied, prim path checks no longer scan every prim, and
+  selection outlines, wire overlays, and bounding boxes are built the
+  first time a mesh needs them instead of three per mesh up front.
+- Scene viewport: the scene store is now backed by a live OpenUSD stage.
+  Every edit (create, delete, move, rename, reparent, reorder, Mesh tab,
+  Light tab, Camera tab, clips) authors the matching prim on an in-memory
+  `Usd.Stage` through the same mapping the USD files use, so the stage
+  always mirrors what the outliner shows. Clips are muted sublayers. No
+  visible change yet; this is the ground for a viewport that draws from
+  the stage. Opening a scene takes slightly longer for imported meshes,
+  whose triangles are embedded in the stage.
+- Scene viewport: the toolbar is now a row of square icon buttons in the
+  style of Maya's Tool Box. Select, Move, Rotate, Scale, World, Local,
+  Edit Pivot, and Snap each get an SVG icon (axis colours red X, green Y,
+  blue Z) shipped in `scene_viewport/icons/`; the active tool shows as a
+  raised square with an accent edge, and the name and hotkey stay in the
+  tooltip. `scene_viewport.icons.tool_icon` renders them.
 - Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
   `.usd`) next to JSON. Transforms, primitives, imported meshes (with
   their triangles embedded for other tools), Mesh tab materials as
