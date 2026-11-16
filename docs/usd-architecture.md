@@ -75,7 +75,7 @@ Hydra the renderer, keeping PySide and mtqt for the UI.
   `Usd.Notice.ObjectsChanged`, filtered by purpose, kind, and active state.
 - Properties: generated from prim schemas and attribute types; transforms
   through `XformCommonAPI`.
-- Timeline bound to the stage time code range; docks with PySide6-QtAds.
+- Timeline bound to the stage time code range; one tab per open stage.
 
 ## Carries over / goes
 

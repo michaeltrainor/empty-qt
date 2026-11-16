@@ -5,7 +5,6 @@ description = "USD stage editor built on mtqt and Hydra Storm. Not published."
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "mtqt",
-    "pyside6-qtads>=4.3.1.4",
     "usd-core>=26.11",
 ]
 classifiers = ["Private :: Do Not Upload"]

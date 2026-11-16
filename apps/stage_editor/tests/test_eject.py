@@ -13,6 +13,7 @@ from stage_editor.eject import (
     merge_back,
     sidecar_file,
 )
+from stage_editor.undo import LayerSnapshotCommand
 
 
 def _composed(stage: Usd.Stage, root: str) -> dict[str, object]:
@@ -123,3 +124,20 @@ def test_ejecting_referenced_content_is_shadowed(tmp_path: Path) -> None:
     assert _composed(shot, "/Shot") == before
     # The referenced scene file itself is never changed.
     assert Sdf.Layer.FindOrOpen(str(scene)).GetPrimAtPath("/World/Chair") is not None
+
+
+def test_eject_undo_and_redo_restore_the_layers(tmp_path: Path) -> None:
+    stage, scene = _scene(tmp_path)
+    root = stage.GetRootLayer()
+    before = root.ExportToString()
+    file = sidecar_file(scene, "Chair")
+    command = LayerSnapshotCommand(
+        "Eject", [root], lambda: eject(stage, "/World/Chair", file, root)
+    )
+    command.redo()
+    after = root.ExportToString()
+    command.undo()
+    assert root.ExportToString() == before
+    command.redo()  # replays the result; the file is not written twice
+    assert root.ExportToString() == after
+    assert file.exists()

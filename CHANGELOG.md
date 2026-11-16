@@ -2,9 +2,19 @@
 
 ## Unreleased
 
-- Stage editor: usdview-style tooling. Panels dock with the Qt Advanced
-  Docking System (new app dependency `PySide6-QtAds`), and the layout
-  and view settings are remembered. The Display menu sets draw mode,
+- Stage editor: editing. Every open stage is a tab, laid out like the
+  scene viewport (tree and layers left, inspector right, timeline below).
+  A Move/Rotate/Scale gizmo
+  writes the prim's own transform ops; the Create menu adds shapes,
+  lights, cameras, and MaterialX `standard_surface` materials; prims can
+  be renamed, reparented by dragging, duplicated, grouped, deleted (or
+  deactivated when they come from a referenced file), and bound to
+  materials. Layer > Eject to Layer moves a prim into
+  `<scene>_assets/<Name>.usda`, references it back in place, and opens it
+  in its own tab; edits there show in the scene at once, and Merge Back
+  folds it back. Every edit can be undone.
+- Stage editor: usdview-style tooling. The panel sizes and view settings
+  are remembered. The Display menu sets draw mode,
   complexity, purposes, lights, AOV, background, selection bounds, and a
   HUD; the Camera menu looks through stage cameras; the pick mode
   selects prims, models, or instances. The outliner gains type and

@@ -11,7 +11,7 @@ the session layer.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from pxr import Sdf, Usd, UsdGeom
@@ -19,12 +19,14 @@ from PySide6.QtCore import (
     QAbstractItemModel,
     QItemSelection,
     QItemSelectionModel,
+    QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
     QPoint,
     QSortFilterProxyModel,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication
@@ -43,6 +45,9 @@ from PySide6.QtWidgets import (
 from stage_editor.document import SESSION_ROOT, StageDocument
 
 _ModelIndex = QModelIndex | QPersistentModelIndex
+
+#: Drag-and-drop payload: newline-separated prim paths.
+MIME_TYPE = "application/x-stage-editor-prim-paths"
 
 #: usdview's prim colours.
 NORMAL_COLOR = QColor(227, 227, 227)
@@ -122,7 +127,11 @@ def _node_for(prim: Usd.Prim, parent: _Node) -> _Node:
 
 
 class PrimModel(QAbstractItemModel):
-    """Read-only tree of the document's prims: name, type, and visibility.
+    """Tree of the document's prims: name, type, and visibility.
+
+    Editing a name or dropping rows only *requests* the change through
+    :attr:`renameRequested` and :attr:`reparentRequested`; the owner applies
+    it to the stage, and the resulting resync rebuilds the model.
 
     The tree traverses instance proxies, so instanced scenes expand, and
     lists the prims :attr:`filter` admits. The editor's session helper
@@ -130,10 +139,17 @@ class PrimModel(QAbstractItemModel):
     :attr:`StageDocument.changed` rebuilds the model; property and
     info-only changes refresh their rows.
 
+    Signals:
+        renameRequested(str, str): Rename the prim at a path to a name.
+        reparentRequested(list, str): Move prim paths under a parent path.
+
     Args:
         document: The document to mirror.
         parent: Owning ``QObject``.
     """
+
+    renameRequested = Signal(str, str)
+    reparentRequested = Signal(list, str)
 
     #: ``data`` role holding the prim path as a string.
     PathRole = Qt.ItemDataRole.UserRole + 1
@@ -360,6 +376,63 @@ class PrimModel(QAbstractItemModel):
             return self.HEADERS[section]
         return None
 
+    # -- editing: rename and drag to reparent -----------------------------------
+
+    def flags(self, index: _ModelIndex) -> Qt.ItemFlag:
+        flags = super().flags(index) | Qt.ItemFlag.ItemIsDropEnabled
+        if not index.isValid():
+            return flags
+        node = self._node(index)
+        if not node.instance_proxy and not node.in_prototype:
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
+            if index.column() == self.NAME:
+                flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def setData(
+        self, index: _ModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole
+    ) -> bool:
+        if role != Qt.ItemDataRole.EditRole or index.column() != self.NAME:
+            return False
+        node = self._node(index)
+        name = str(value).strip()
+        if name and name != node.name:
+            path = node.path
+            # The rename rebuilds this model; let the editor close first.
+            QTimer.singleShot(0, lambda: self.renameRequested.emit(path, name))
+        return False
+
+    def supportedDropActions(self) -> Qt.DropAction:
+        return Qt.DropAction.MoveAction
+
+    def mimeTypes(self) -> list[str]:
+        return [MIME_TYPE]
+
+    def mimeData(self, indexes: Sequence[QModelIndex]) -> QMimeData:
+        paths = list(dict.fromkeys(self.path_at(i) for i in indexes if i.isValid()))
+        data = QMimeData()
+        data.setData(MIME_TYPE, "\n".join(paths).encode("utf-8"))
+        return data
+
+    def dropMimeData(
+        self,
+        data: QMimeData,
+        action: Qt.DropAction,
+        row: int,
+        column: int,
+        parent: _ModelIndex,
+    ) -> bool:
+        if not data.hasFormat(MIME_TYPE):
+            return False
+        text = bytes(data.data(MIME_TYPE).data()).decode("utf-8")
+        paths = [p for p in text.split("\n") if p]
+        target = self.path_at(parent) or "/"
+        if paths:
+            # Reparenting rebuilds the model; never inside the drop event.
+            QTimer.singleShot(0, lambda: self.reparentRequested.emit(paths, target))
+        # False: the view must not remove the dragged rows itself.
+        return False
+
 
 class _SearchProxy(QSortFilterProxyModel):
     """Keep rows whose name contains the search text, with their ancestors."""
@@ -385,6 +458,8 @@ class Outliner(QWidget):
             :meth:`set_selected_paths` do not emit.
         frameRequested(list): Frame these prim paths in the view.
         cameraRequested(str): Look through the camera at this path.
+        renameRequested(str, str): Rename a prim (F2 or double-click).
+        reparentRequested(list, str): Move prims under a parent (drag).
 
     Args:
         document: The document to show.
@@ -394,6 +469,8 @@ class Outliner(QWidget):
     selectedPathsChanged = Signal(list)
     frameRequested = Signal(list)
     cameraRequested = Signal(str)
+    renameRequested = Signal(str, str)
+    reparentRequested = Signal(list, str)
 
     def __init__(self, document: StageDocument, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -433,6 +510,17 @@ class Outliner(QWidget):
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
         self._view.clicked.connect(self._on_clicked)
+        self._view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._view.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._view.setDropIndicatorShown(True)
+        self._view.setEditTriggers(
+            QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
+        )
+        self._model.renameRequested.connect(self.renameRequested)
+        self._model.reparentRequested.connect(self.reparentRequested)
+        #: Called with the menu and selected paths to add editing actions.
+        self.menu_hook: Callable[[QMenu, list[str]], None] | None = None
         header = self._view.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(PrimModel.NAME, QHeaderView.ResizeMode.Stretch)
@@ -591,13 +679,26 @@ class Outliner(QWidget):
             return
         self._document.set_visible([path], not self._model.is_visible(path))
 
+    def edit_current_name(self) -> None:
+        """Start editing the name of the current row (F2)."""
+        index = self._view.currentIndex()
+        if index.isValid():
+            self._view.edit(index.siblingAtColumn(PrimModel.NAME))
+
     def _on_context_menu(self, position: QPoint) -> None:
         paths = self.selected_paths()
+        menu = QMenu(self)
+        viewport = self._view.viewport()
+        assert viewport is not None
+        if self.menu_hook is not None:
+            self.menu_hook(menu, paths)
         if not paths:
+            if not menu.isEmpty():
+                menu.exec(viewport.mapToGlobal(position))
             return
+        menu.addSeparator()
         stage = self._document.stage
         prims = [stage.GetPrimAtPath(p) for p in paths]
-        menu = QMenu(self)
         menu.addAction("Frame", lambda: self.frameRequested.emit(paths))
         if len(prims) == 1 and prims[0].IsA(UsdGeom.Camera):
             menu.addAction("Look Through", lambda: self.cameraRequested.emit(paths[0]))
@@ -622,8 +723,6 @@ class Outliner(QWidget):
         menu.addSeparator()
         menu.addAction("Expand All", self._view.expandAll)
         menu.addAction("Collapse All", self._view.collapseAll)
-        viewport = self._view.viewport()
-        assert viewport is not None
         menu.exec(viewport.mapToGlobal(position))
 
     def _on_selection_changed(

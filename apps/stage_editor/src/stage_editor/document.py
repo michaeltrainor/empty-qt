@@ -618,6 +618,10 @@ class StageDocument(QObject):
             candidate = parent.AppendChild(f"{stem}_{suffix}")
         return candidate
 
+    def mark_saved(self) -> None:
+        """Treat the current state as saved, for example after a merge back."""
+        self._set_edited(False)
+
     def _set_edited(self, edited: bool) -> None:
         if edited != self._edited:
             self._edited = edited
