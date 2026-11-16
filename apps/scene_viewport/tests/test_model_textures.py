@@ -26,6 +26,7 @@ from scene_viewport.materials import (  # noqa: E402
 )
 from scene_viewport.mesh.importer import load_model  # noqa: E402
 from scene_viewport.mesh.references import (  # noqa: E402
+    forget_signatures,
     reference_problems,
     referenced_files,
     remote_references,
@@ -285,6 +286,7 @@ def test_editing_a_texture_changes_the_signature_and_reloads(tmp_path: Path) -> 
     Image.new("RGBA", (4, 4), (0, 255, 0, 255)).save(image)
     stat = image.stat()
     os.utime(image, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    forget_signatures()
     assert source_signature(path) != before
     second = load_model(path)
     assert second is not first
@@ -350,11 +352,13 @@ def test_edited_mtl_is_rescanned_without_touching_the_obj(tmp_path: Path) -> Non
     _touch_later(library)
     names = [file.name for file in referenced_files(path)]
     assert "rough.png" in names
+    forget_signatures()
     assert source_signature(path) != before
     assert load_model(path) is not first
     # Editing the new texture now counts as an edit too.
     after = source_signature(path)
     _touch_later(tmp_path / "rough.png")
+    forget_signatures()
     assert source_signature(path) != after
 
 

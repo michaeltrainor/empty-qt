@@ -47,6 +47,7 @@ from scene_viewport.mesh.importer import (
 from scene_viewport.mesh.references import (
     FileStamp,
     file_stamp,
+    forget_signatures,
     source_signature,
 )
 from scene_viewport.mesh.types import MapKind
@@ -252,6 +253,26 @@ class ViewportController:
         # pygfx still sends a click when a drag ends on its start target.
         self._suppress_click = False
         self._settings = AppSettings()
+        # Outlines, draw wires, and bounding boxes are built on first use
+        # and share one material each: a scene of thousands of meshes
+        # selects or boxes a few at a time, and building three helpers per
+        # mesh up front cost more than the meshes themselves.
+        self._outline_material = gfx.MeshBasicMaterial(
+            color=_OUTLINE_COLOR,
+            wireframe=True,
+            wireframe_thickness=self._settings.outline_thickness,  # pyright: ignore[reportArgumentType]
+        )
+        self._draw_wire_material = gfx.MeshBasicMaterial(
+            color=_DRAW_WIRE_COLOR,
+            wireframe=True,
+            wireframe_thickness=1.0,  # pyright: ignore[reportArgumentType]
+        )
+        self._bbox_material = gfx.LineSegmentMaterial(
+            thickness=1.5, color=_BBOX_COLOR, aa=True, pick_write=True
+        )
+        self._bbox_selected_material = gfx.LineSegmentMaterial(
+            thickness=1.5, color=_BBOX_SELECTED_COLOR, aa=True, pick_write=True
+        )
         self._background: gfx.Background | None = None
         self._ambient: gfx.AmbientLight | None = None
         self._grid: gfx.GridHelper | None = None
@@ -446,9 +467,7 @@ class ViewportController:
                 material.env_map_intensity = intensity
 
     def _refresh_outline_thickness(self) -> None:
-        thickness = self._settings.outline_thickness
-        for outline in self._outlines.values():
-            _material_of(outline, gfx.MeshBasicMaterial).wireframe_thickness = thickness
+        self._outline_material.wireframe_thickness = self._settings.outline_thickness
 
     def _file_material(
         self, component: MeshComponent
@@ -567,41 +586,116 @@ class ViewportController:
             **surface_kwargs(component),
         )
 
-    def _apply_draw_mode_to_mesh(self, name: str) -> None:
-        """Rebuild materials / visibility for one mesh under the active mode."""
+    def _apply_draw_mode_to_mesh(self, name: str, *, rebuild: bool = True) -> None:
+        """Set one mesh's material, helpers, and shadows for the active mode.
+
+        Args:
+            name: Mesh component UID.
+            rebuild: Build the material again. ``False`` when the mesh was
+                just created with :meth:`_mode_material`.
+        """
         mesh = self._meshes.get(name)
         component = self._mesh_components.get(name)
         if mesh is None or component is None:
             return
         mode = self._draw_mode
-        bbox = self._bboxes.get(name)
-        draw_wire = self._draw_wires.get(name)
         lit = mode in _LIT_DRAW_MODES
 
         mesh.visible = mode != "bounding_box"
+        boxed = mode == "bounding_box"
+        bbox = self._bbox_for(name) if boxed else self._bboxes.get(name)
         if bbox is not None:
-            bbox.visible = mode == "bounding_box"
+            bbox.visible = boxed
+        wired = mode == "wire_shaded"
+        draw_wire = self._draw_wire_for(name) if wired else self._draw_wires.get(name)
         if draw_wire is not None:
-            draw_wire.visible = mode == "wire_shaded"
+            draw_wire.visible = wired
 
-        if mode == "bounding_box":
+        if boxed:
             mesh.cast_shadow = False
             mesh.receive_shadow = False
             return
-
-        if mode == "wireframe":
-            mesh.material = self._basic_mesh_material(component, wireframe=True)
-        elif mode == "flat":
-            mesh.material = self._basic_mesh_material(component)
-        else:
-            # shaded, textured, wire_shaded
-            mesh.material = self._mesh_material(
-                component,
-                textured=(mode == "textured"),
-            )
-
+        if rebuild:
+            mesh.material = self._mode_material(component)
         mesh.cast_shadow = bool(component.cast_shadow and lit)
         mesh.receive_shadow = bool(component.receive_shadow and lit)
+
+    def _mode_material(self, component: MeshComponent) -> gfx.Material:
+        """Build the material the active draw mode needs for ``component``."""
+        mode = self._draw_mode
+        if mode == "wireframe":
+            return self._basic_mesh_material(component, wireframe=True)
+        if mode == "flat":
+            return self._basic_mesh_material(component)
+        # shaded, textured, wire_shaded; bounding_box keeps whatever is set.
+        return self._mesh_material(component, textured=(mode == "textured"))
+
+    def _outline_for(self, name: str) -> gfx.Mesh:
+        """Return the selection outline of mesh ``name``, built on first use."""
+        outline = self._outlines.get(name)
+        if outline is None:
+            mesh = self._meshes[name]
+            outline = gfx.Mesh(
+                mesh.geometry,
+                self._outline_material,
+                cast_shadow=False,
+                receive_shadow=False,
+            )
+            outline.visible = False
+            # Slight inflate so the wire rim clears the shaded surface.
+            outline.local.scale = (1.015, 1.015, 1.015)
+            mesh.add(outline)
+            self._outlines[name] = outline
+        return outline
+
+    def _draw_wire_for(self, name: str) -> gfx.Mesh:
+        """Return the wire-on-shaded overlay of mesh ``name``, built on first use."""
+        draw_wire = self._draw_wires.get(name)
+        if draw_wire is None:
+            mesh = self._meshes[name]
+            draw_wire = gfx.Mesh(
+                mesh.geometry,
+                self._draw_wire_material,
+                cast_shadow=False,
+                receive_shadow=False,
+            )
+            draw_wire.visible = False
+            draw_wire.local.scale = (1.008, 1.008, 1.008)
+            mesh.add(draw_wire)
+            self._draw_wires[name] = draw_wire
+        return draw_wire
+
+    def _bbox_for(self, name: str) -> gfx.Line:
+        """Return the bounding box of mesh ``name``, built on first use.
+
+        It is a sibling of the mesh, so it stays visible when the mesh is
+        hidden, and it is pickable like the mesh.
+        """
+        bbox = self._bboxes.get(name)
+        if bbox is None:
+            mesh = self._meshes[name]
+            transform = self._mesh_to_transform[name]
+            selected = name in self._selected_meshes()
+            bbox = gfx.Line(
+                self._aabb_line_geometry(mesh),
+                self._bbox_selected_material if selected else self._bbox_material,
+            )
+            bbox.name = f"{name}BBox"
+            bbox.visible = False
+            bbox.cast_shadow = False
+            bbox.receive_shadow = False
+            bbox.add_event_handler(self._on_pickable_click, "click")
+            self._groups[transform].add(bbox)
+            self._bboxes[name] = bbox
+            self._helper_to_transform[bbox.name] = transform
+        return bbox
+
+    def _selected_meshes(self) -> set[str]:
+        """Names of the meshes on the selected transforms."""
+        selected: set[str] = set()
+        for transform_name in self._selected:
+            selected.update(self._transform_to_meshes.get(transform_name, ()))
+        return selected
 
     @staticmethod
     def _aabb_line_geometry(mesh: gfx.Mesh) -> gfx.Geometry:
@@ -1614,6 +1708,7 @@ class ViewportController:
         Returns:
             Names of the meshes that were refreshed.
         """
+        forget_signatures()
         stale = {
             key
             for key, stamp in self._albedo_stamps.items()
@@ -1682,69 +1777,19 @@ class ViewportController:
         geometry = self._geometry_for(component)
         mesh = gfx.Mesh(
             geometry,
-            self._mesh_material(component),
+            self._mode_material(component),
             cast_shadow=component.cast_shadow,
             receive_shadow=component.receive_shadow,
         )
         mesh.name = component.name
         mesh.add_event_handler(self._on_pickable_click, "click")
-
-        outline = gfx.Mesh(
-            geometry,
-            gfx.MeshBasicMaterial(
-                color=_OUTLINE_COLOR,
-                wireframe=True,
-                wireframe_thickness=self._settings.outline_thickness,  # pyright: ignore[reportArgumentType]
-            ),
-            cast_shadow=False,
-            receive_shadow=False,
-        )
-        outline.visible = False
-        # Slight inflate so the wire rim clears the shaded surface.
-        outline.local.scale = (1.015, 1.015, 1.015)
-        mesh.add(outline)
-
-        draw_wire = gfx.Mesh(
-            geometry,
-            gfx.MeshBasicMaterial(
-                color=_DRAW_WIRE_COLOR,
-                wireframe=True,
-                wireframe_thickness=1.0,  # pyright: ignore[reportArgumentType]
-            ),
-            cast_shadow=False,
-            receive_shadow=False,
-        )
-        draw_wire.visible = False
-        draw_wire.local.scale = (1.008, 1.008, 1.008)
-        mesh.add(draw_wire)
-
-        # Sibling of the mesh so bbox stays visible when the mesh is hidden.
-        bbox = gfx.Line(
-            self._aabb_line_geometry(mesh),
-            gfx.LineSegmentMaterial(
-                thickness=1.5,
-                color=_BBOX_COLOR,
-                aa=True,
-                pick_write=True,
-            ),
-        )
-        bbox.name = f"{component.name}BBox"
-        bbox.visible = False
-        bbox.cast_shadow = False
-        bbox.receive_shadow = False
-        bbox.add_event_handler(self._on_pickable_click, "click")
         group.add(mesh)
-        group.add(bbox)
 
         self._meshes[component.name] = mesh
         self._mesh_components[component.name] = component.model_copy(deep=True)
-        self._outlines[component.name] = outline
-        self._draw_wires[component.name] = draw_wire
-        self._bboxes[component.name] = bbox
         self._mesh_to_transform[component.name] = component.transform
-        self._helper_to_transform[bbox.name] = component.transform
         self._transform_to_meshes[component.transform].append(component.name)
-        self._apply_draw_mode_to_mesh(component.name)
+        self._apply_draw_mode_to_mesh(component.name, rebuild=False)
 
     def _add_light(self, component: LightComponent) -> None:
         group = self._groups.get(component.transform)
@@ -1819,16 +1864,20 @@ class ViewportController:
         self.renderer.render(self._overlay_scene, self._overlay_camera)
 
     def _apply_highlights(self) -> None:
-        selected_meshes: set[str] = set()
-        for transform_name in self._selected:
-            selected_meshes.update(self._transform_to_meshes.get(transform_name, ()))
+        selected_meshes = self._selected_meshes()
         show_outline = self._draw_mode != "bounding_box"
         for name, outline in self._outlines.items():
             outline.visible = show_outline and name in selected_meshes
+        if show_outline:
+            for name in selected_meshes:
+                if name in self._meshes:
+                    self._outline_for(name).visible = True
         for name, bbox in self._bboxes.items():
-            selected = name in selected_meshes
-            material = _material_of(bbox, gfx.LineSegmentMaterial)
-            material.color = _BBOX_SELECTED_COLOR if selected else _BBOX_COLOR
+            bbox.material = (
+                self._bbox_selected_material
+                if name in selected_meshes
+                else self._bbox_material
+            )
 
     def _end_drag(self) -> None:
         self._drag_active = False

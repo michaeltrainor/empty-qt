@@ -23,6 +23,7 @@ from scene_viewport.mesh.importer import (  # noqa: E402
     importable_paths,
     load_model,
 )
+from scene_viewport.mesh.references import forget_signatures  # noqa: E402
 from scene_viewport.model_import import import_objects, safe_name  # noqa: E402
 from scene_viewport.scene_io import SceneDocument, load_scene, save_scene  # noqa: E402
 from scene_viewport.viewport import ViewportController  # noqa: E402
@@ -118,6 +119,8 @@ def test_load_model_reuses_an_unchanged_file(tmp_path: Path) -> None:
     assert load_model(path) is first
     stat = path.stat()
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    # Signatures are reused for a moment; the window forgets them on reload.
+    forget_signatures()
     assert load_model(path) is not first
 
 
