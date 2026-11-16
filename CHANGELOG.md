@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Stage editor: editing. Every open stage is a tab, laid out like the
+  scene viewport (tree and layers left, inspector right, timeline below).
+  A Move/Rotate/Scale gizmo
+  writes the prim's own transform ops; the Create menu adds shapes,
+  lights, cameras, and MaterialX `standard_surface` materials; prims can
+  be renamed, reparented by dragging, duplicated, grouped, deleted (or
+  deactivated when they come from a referenced file), and bound to
+  materials. Layer > Eject to Layer moves a prim into
+  `<scene>_assets/<Name>.usda`, references it back in place, and opens it
+  in its own tab; edits there show in the scene at once, and Merge Back
+  folds it back. Every edit can be undone.
+- Stage editor: usdview-style tooling. The panel sizes and view settings
+  are remembered. The Display menu sets draw mode,
+  complexity, purposes, lights, AOV, background, selection bounds, and a
+  HUD; the Camera menu looks through stage cameras; the pick mode
+  selects prims, models, or instances. The outliner gains type and
+  visibility columns, usdview's colours, filters, search, and a context
+  menu whose visibility, active, and payload changes go to the session
+  layer. A new inspector shows properties with their value sources,
+  metadata and variants, the layer stack, and composition arcs. Attribute
+  values and variant selections can be edited and undone. A layers panel
+  sets the edit target, mutes layers, and shows them as usda. Tools add a
+  UsdValidation panel (usdchecker's checks, with fixers) and a Python
+  console. New flags follow usdview: `--camera`, `--unloaded`, `--mask`,
+  `--complexity`, `--draw-mode`, `--select`, and `--cf`. See the new
+  Stage editor docs page.
 - Stage editor: a new `apps/stage_editor` app where the OpenUSD stage is
   the document and Hydra Storm draws it. New, Open, Save, and Save As
   work on USD files; a USD file from another tool is referenced into a

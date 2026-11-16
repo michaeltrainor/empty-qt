@@ -90,13 +90,15 @@ Run and Debug in VS Code or Cursor lists these configurations (`.vscode/launch.j
 
 `apps/stage_editor` is the second app in the workspace and the step-2 package of the [USD architecture plan](usd-architecture.md): the `Usd.Stage` is the document and Hydra Storm draws it. `StageDocument` owns the stage, relays `Usd.Notice.ObjectsChanged` as a Qt signal, and holds the current time code. File → Open edits a scene the editor saved; any other USD file is referenced under `/World` of a new untitled scene, so Save never overwrites a foreign asset, and File → Add Reference composes more files. The outliner is a `QAbstractItemModel` over the prims; the timeline plays stage time; **F** frames the selection and **A** the stage; a click in the view picks a prim.
 
-The view needs `pxr.UsdImagingGL`, which the `usd-core` wheel does not ship. Build it once with `scriptsuild_usd_imaging.cmd` (Windows, about 15 minutes), then point the process at the install; without it the window opens with a notice in place of the view, and the tests still run:
+The view needs `pxr.UsdImagingGL`, which the `usd-core` wheel does not ship. Build it once with `scripts/build_usd_imaging.cmd` (Windows, about 15 minutes), then point the process at the install (the [Stage editor](stage-editor.md) page has the PowerShell form); without it the window opens with a notice in place of the view, and the tests still run:
 
 ```bat
 set PYTHONPATH=%USERPROFILE%\dev\openusd\inst\Lib\site-packages
-set PATH=%USERPROFILE%\dev\openusd\inst\lib;%USERPROFILE%\dev\openusd\instin;%PATH%
-uv run --package stage-editor stage-editor path	o\scene.usd
+set PATH=%USERPROFILE%\dev\openusd\inst\lib;%USERPROFILE%\dev\openusd\inst\bin;%PATH%
+uv run --package stage-editor stage-editor path\to\scene.usd
 ```
+
+The panels, menus, and command-line flags are described on the [Stage editor](stage-editor.md) page.
 
 ## Conventions
 
