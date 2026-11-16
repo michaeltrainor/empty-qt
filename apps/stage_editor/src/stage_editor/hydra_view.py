@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from pxr import Gf, Sdf, Tf, Usd, UsdGeom
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -27,6 +27,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QOpenGLFunctions,
     QPainter,
+    QPen,
     QSurfaceFormat,
     QWheelEvent,
 )
@@ -34,6 +35,9 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from stage_editor.display import ViewSettings, complexity_label, pick_target
 from stage_editor.document import SESSION_ROOT, StageDocument
+from stage_editor.gizmo import Gizmo, Handle
+from stage_editor.manipulate import set_world_matrix, world_matrix, xform_spec_paths
+from stage_editor.undo import SdfEditCommand
 
 try:
     # Imaging-only modules: stubbed in typings/pxr, absent from the usd-core wheel.
@@ -262,6 +266,12 @@ class HydraView(QOpenGLWidget):
         self._last_paint = 0.0
         self._fps = 0.0
         self._render_ms = 0.0
+        self._tool = "select"
+        self._space = "world"
+        self._gizmo: Gizmo | None = None
+        self._hover: Handle | None = None
+        self._drag: dict[str, Any] | None = None
+        self.setMouseTracking(True)
         document.stageReplaced.connect(self._on_stage_replaced)
         document.changed.connect(self._on_changed)
         document.timeChanged.connect(self._on_time_changed)
@@ -547,8 +557,11 @@ class HydraView(QOpenGLWidget):
             self._fps = 0.0
         self._last_paint = started
         self.renderTimed.emit(elapsed)
+        painter = QPainter(self)
         if self._settings.show_hud:
-            self._paint_hud()
+            self._paint_hud(painter)
+        self._paint_gizmo(painter, width / height)
+        painter.end()
 
     def _hud_lines(self) -> list[str]:
         stats = self._prim_stats()
@@ -563,8 +576,8 @@ class HydraView(QOpenGLWidget):
             f"Frame {self._document.time:g}",
         ]
 
-    def _paint_hud(self) -> None:
-        painter = QPainter(self)
+    def _paint_hud(self, painter: QPainter) -> None:
+        painter.save()
         font = QFont(painter.font())
         font.setStyleHint(QFont.StyleHint.Monospace)
         painter.setFont(font)
@@ -576,17 +589,185 @@ class HydraView(QOpenGLWidget):
             painter.setPen(QColor(230, 200, 90))
             painter.drawText(10, y, line)
             y += metrics.height()
-        painter.end()
+        painter.restore()
+
+    # -- gizmo ----------------------------------------------------------------
+
+    @property
+    def tool(self) -> str:
+        """The active tool: ``select``, ``translate``, ``rotate``, or ``scale``."""
+        return self._tool
+
+    def set_tool(self, tool: str) -> None:
+        """Switch the transform tool; ``select`` hides the gizmo.
+
+        Args:
+            tool: ``select``, ``translate``, ``rotate``, or ``scale``.
+        """
+        self._tool = tool
+        self.update()
+
+    def set_space(self, space: str) -> None:
+        """Use ``world`` or ``local`` axes for move and rotate.
+
+        Args:
+            space: ``world`` or ``local``.
+        """
+        self._space = space
+        self.update()
+
+    def _projector(self, aspect: float):
+        """Return a world-point-to-widget-pixel function for the active camera."""
+        frustum = self._active_camera(aspect).frustum
+        matrix = frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix()
+        width, height = self.width(), self.height()
+
+        def project(point: Gf.Vec3d) -> tuple[float, float] | None:
+            clip = Gf.Vec4d(point[0], point[1], point[2], 1.0) * matrix
+            if clip[3] <= 1e-9:
+                return None
+            return (
+                (clip[0] / clip[3] + 1.0) * 0.5 * width,
+                (1.0 - clip[1] / clip[3]) * 0.5 * height,
+            )
+
+        return project
+
+    def _editable_paths(self) -> list[str]:
+        """Selected prims the gizmo may move: xformable, not instance proxies."""
+        stage = self._document.stage
+        prims = [stage.GetPrimAtPath(p) for p in self._selected]
+        prims = [
+            p
+            for p in prims
+            if p and p.IsA(UsdGeom.Xformable) and not p.IsInstanceProxy()
+        ]
+        paths = [p.GetPath() for p in prims]
+        # A selected descendant already moves with its selected ancestor.
+        return [
+            str(p) for p in paths if not any(p != q and p.HasPrefix(q) for q in paths)
+        ]
+
+    def _layout_gizmo(self, aspect: float) -> Gizmo | None:
+        paths = self._editable_paths()
+        if self._tool == "select" or not paths:
+            return None
+        gizmo = Gizmo(self._tool, self._space)
+        prim = self._document.stage.GetPrimAtPath(paths[0])
+        world = world_matrix(prim, self._document.time)
+        if not gizmo.layout(world, self._projector(aspect)):
+            return None
+        return gizmo
+
+    def _paint_gizmo(self, painter: QPainter, aspect: float) -> None:
+        gizmo = self._gizmo = self._layout_gizmo(aspect)
+        if gizmo is None:
+            return
+        colors = (QColor(230, 80, 80), QColor(110, 200, 90), QColor(80, 140, 240))
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = self._drag["handle"] if self._drag else self._hover
+        for handle in gizmo.handles:
+            hot = active is not None and handle.axis == active.axis
+            if hot:
+                color = QColor(255, 220, 60)
+            elif handle.axis < 3:
+                color = colors[handle.axis]
+            else:
+                color = QColor(220, 220, 220)
+            painter.setPen(QPen(color, 3.0 if hot else 2.0))
+            points = [QPointF(x, y) for x, y in handle.points]
+            if len(points) == 1:
+                painter.drawRect(QRectF(points[0] - QPointF(6, 6), QSizeF(12, 12)))
+                continue
+            painter.drawPolyline(points)
+            if gizmo.tool in ("translate", "scale"):
+                tip = points[-1]
+                painter.setBrush(color)
+                if gizmo.tool == "scale":
+                    painter.drawRect(QRectF(tip - QPointF(5, 5), QSizeF(10, 10)))
+                else:
+                    painter.drawEllipse(tip, 5.0, 5.0)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.restore()
+
+    def _begin_drag(self, handle: Handle, position: QPointF) -> None:
+        stage = self._document.stage
+        target = stage.GetEditTarget()
+        paths = self._editable_paths()
+        time = self._document.time
+        worlds = [world_matrix(stage.GetPrimAtPath(p), time) for p in paths]
+        specs: list[Sdf.Path] = []
+        for path in paths:
+            specs += xform_spec_paths(stage.GetPrimAtPath(path), target)
+        state: dict[str, Any] = {
+            "handle": handle,
+            "start": (position.x(), position.y()),
+            "paths": paths,
+            "worlds": worlds,
+            "final": worlds,
+            "time": time,
+        }
+
+        def apply() -> None:
+            with Usd.EditContext(stage, target):
+                for path, world in zip(state["paths"], state["final"], strict=True):
+                    set_world_matrix(stage.GetPrimAtPath(path), world, state["time"])
+
+        label = {"translate": "Move", "rotate": "Rotate", "scale": "Scale"}[self._tool]
+        command = SdfEditCommand(label, target.GetLayer(), specs, apply)
+        command.capture()
+        state["command"] = command
+        state["apply"] = apply
+        self._drag = state
+
+    def _update_drag(self, position: QPointF) -> None:
+        drag = self._drag
+        gizmo = self._gizmo
+        if drag is None or gizmo is None:
+            return
+        width, height = self._physical_size()
+        frustum = self._active_camera(width / max(height, 1)).frustum
+        toward = (frustum.position - gizmo.center).GetNormalized()
+        drag["final"] = gizmo.drag(
+            drag["handle"],
+            drag["start"],
+            (position.x(), position.y()),
+            drag["worlds"],
+            toward,
+        )
+        drag["apply"]()
+        self.update()
+
+    def _end_drag(self) -> None:
+        drag, self._drag = self._drag, None
+        if drag is not None and drag["final"] is not drag["worlds"]:
+            # Already applied live; redo on push writes the same values again.
+            self._document.undo_stack.push(drag["command"])
+        self.update()
 
     # -- input ----------------------------------------------------------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.setFocus()
+        if event.button() == Qt.MouseButton.LeftButton and self._gizmo is not None:
+            handle = self._gizmo.hit(event.position().x(), event.position().y())
+            if handle is not None:
+                self._begin_drag(handle, event.position())
+                return
         self._button = event.button()
         self._press = self._last = event.position()
-        self.setFocus()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag is not None:
+            self._update_drag(event.position())
+            return
         if self._last is None:
+            if self._gizmo is not None:
+                hover = self._gizmo.hit(event.position().x(), event.position().y())
+                if (hover and hover.axis) != (self._hover and self._hover.axis):
+                    self._hover = hover
+                    self.update()
             return
         delta = event.position() - self._last
         self._last = event.position()
@@ -603,6 +784,9 @@ class HydraView(QOpenGLWidget):
         self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._drag is not None:
+            self._end_drag()
+            return
         pressed = self._press
         self._press = self._last = None
         self._button = Qt.MouseButton.NoButton

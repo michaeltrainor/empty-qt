@@ -521,9 +521,12 @@ class StageDocument(QObject):
             return
         target = stage.GetEditTarget()
 
+        prim_path = prim.GetPath()
+
         def edit() -> None:
             with Usd.EditContext(stage, target):
-                variants = prim.GetVariantSets().GetVariantSet(variant_set)
+                current = stage.GetPrimAtPath(prim_path)
+                variants = current.GetVariantSets().GetVariantSet(variant_set)
                 if selection:
                     variants.SetVariantSelection(selection)
                 else:
@@ -567,9 +570,11 @@ class StageDocument(QObject):
         )
         target = stage.GetEditTarget()
 
+        attr_path = attr.GetPath()
+
         def edit() -> None:
             with Usd.EditContext(stage, target):
-                attr.Set(value, time)
+                stage.GetAttributeAtPath(attr_path).Set(value, time)
 
         self.undo_stack.push(
             SdfEditCommand(

@@ -176,6 +176,15 @@ class SdfEditCommand(QUndoCommand):
         self._edit = edit
         self._snapshots: list[_Snapshot] | None = None
 
+    def capture(self) -> None:
+        """Snapshot the specs now, for an edit already being previewed live.
+
+        Call this before the first live change (a gizmo drag) and push the
+        command when the drag ends; the edit then only sets final values.
+        """
+        if self._snapshots is None:
+            self._snapshots = [_Snapshot.capture(self._layer, p) for p in self._paths]
+
     def redo(self) -> None:
         if self._snapshots is None:
             self._snapshots = [_Snapshot.capture(self._layer, p) for p in self._paths]
@@ -185,3 +194,60 @@ class SdfEditCommand(QUndoCommand):
         with Sdf.ChangeBlock():
             for snapshot in reversed(self._snapshots or []):
                 snapshot.restore()
+
+
+class LayerSnapshotCommand(QUndoCommand):
+    """An undoable edit that may touch anything on a few whole layers.
+
+    Structural edits (delete, rename, reparent, eject) move specs around
+    and fix up paths across layers, so naming the touched specs up front is
+    not practical. This command copies each layer's whole content before
+    and after the first run and transfers the copies back on undo and redo,
+    so redo never depends on the edit being repeatable (an eject writes its
+    file only once).
+
+    Args:
+        text: Label for the Edit menu.
+        layers: Every layer the edit may change.
+        edit: Performs the edit. If it raises, the layers are restored, the
+            command is marked obsolete, and the exception propagates.
+    """
+
+    def __init__(
+        self, text: str, layers: Sequence[Sdf.Layer], edit: Callable[[], None]
+    ) -> None:
+        super().__init__(text)
+        self._layers = list(dict.fromkeys(layers))
+        self._edit = edit
+        self._before: list[Sdf.Layer] | None = None
+        self._after: list[Sdf.Layer] | None = None
+
+    def _copies(self) -> list[Sdf.Layer]:
+        copies = []
+        for layer in self._layers:
+            copy = Sdf.Layer.CreateAnonymous(".usda")
+            copy.TransferContent(layer)
+            copies.append(copy)
+        return copies
+
+    def _restore(self, copies: list[Sdf.Layer]) -> None:
+        with Sdf.ChangeBlock():
+            for layer, copy in zip(self._layers, copies, strict=True):
+                layer.TransferContent(copy)
+
+    def redo(self) -> None:
+        if self._after is not None:
+            self._restore(self._after)
+            return
+        self._before = self._copies()
+        try:
+            self._edit()
+        except Exception:
+            self._restore(self._before)
+            self.setObsolete(True)
+            raise
+        self._after = self._copies()
+
+    def undo(self) -> None:
+        if self._before is not None:
+            self._restore(self._before)
