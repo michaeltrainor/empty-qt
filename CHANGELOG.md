@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `BreadcrumbBar`: clickable path segments in a scrolling row. `set_crumbs`
+  stays silent, and `crumbActivated` emits the clicked segment's key.
+  Example in `examples/breadcrumb_bar.py`.
+- `ToastStack`: transient messages, newest on top. `show_toast` returns
+  an id, a timer or the close button dismisses it, and `toastDismissed`
+  fires once. Example in `examples/toast_stack.py`.
+- `TagInput`: one row of chips and a line edit. Enter or a comma commits
+  a tag, Backspace on an empty draft removes the last one, and
+  `tagsChanged` emits the new tuple. Example in `examples/tag_input.py`.
+- `CommandPalette`: line edit over a ranked command list. An empty query
+  lists every command. Typing keeps subsequence matches, tighter ones
+  first. Enter emits `commandTriggered` with the command id. Example in
+  `examples/command_palette.py`.
+- `RangeSlider`: horizontal dual-handle slider. The host sets bounds and
+  values without a signal. A drag emits `rangeChanged` with the lower and
+  upper values. Example in `examples/range_slider.py`.
 - Stage editor: editing. Every open stage is a tab, laid out like the
   scene viewport (tree and layers left, inspector right, timeline below).
   A Move/Rotate/Scale gizmo

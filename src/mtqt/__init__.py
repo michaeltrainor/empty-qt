@@ -11,6 +11,10 @@ from mtqt.models import (
 )
 from mtqt.style import apply_stylesheet, load_stylesheet
 from mtqt.widgets import (
+    BreadcrumbBar,
+    Command,
+    CommandPalette,
+    Crumb,
     DropWidget,
     GraphHistory,
     LabeledLineEdit,
@@ -19,8 +23,12 @@ from mtqt.widgets import (
     PathPicker,
     PropertiesBook,
     PropertiesPanel,
+    RangeSlider,
     SceneGraphTree,
+    TagInput,
     TimelineBar,
+    ToastLevel,
+    ToastStack,
 )
 
 try:
@@ -31,6 +39,10 @@ except PackageNotFoundError:
 
 __all__ = [
     "SCENE_GRAPH_MIME_TYPE",
+    "BreadcrumbBar",
+    "Command",
+    "CommandPalette",
+    "Crumb",
     "DropWidget",
     "GraphHistory",
     "LabeledLineEdit",
@@ -42,10 +54,14 @@ __all__ = [
     "PathPicker",
     "PropertiesBook",
     "PropertiesPanel",
+    "RangeSlider",
     "SceneGraphModel",
     "SceneGraphTree",
     "SceneNode",
+    "TagInput",
     "TimelineBar",
+    "ToastLevel",
+    "ToastStack",
     "__version__",
     "apply_stylesheet",
     "ensure_application",

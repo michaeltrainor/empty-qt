@@ -160,6 +160,82 @@ timer.timeout.connect(lambda: bar.set_time(player.time))
 
 The scene viewport shows one under the viewport when the scene has animation clips.
 
+## Range slider
+
+`RangeSlider` is a horizontal slider with two handles. The values stay ordered, minimum <= lower <= upper <= maximum. The default bounds are 0 and 100, and the handles start at those ends. `set_bounds` and `set_values` stay silent, so a host can push a model on a timer. `rangeChanged(float, float)` fires when the user drags a handle, with the lower value and then the upper value. A drag cannot push one handle past the other.
+
+```python
+from mtqt import RangeSlider
+
+slider = RangeSlider(parent=window)
+slider.set_bounds(0, 100)
+slider.set_values(20, 80)
+slider.rangeChanged.connect(lambda lower, upper: print(lower, upper))
+```
+
+## Command palette
+
+`CommandPalette` is a line edit over a list of `Command` values. A host embeds it and fills the list. An empty query shows every command in the order given. Any other query keeps commands whose title and detail contain those characters in order, ignoring case, and ranks a tighter match first. `set_commands` keeps the current query. `set_commands` and `set_query` stay silent. Up and Down move the highlight. Enter, or activating a row, emits `commandTriggered(str)` with the command id. Escape clears the query and emits nothing.
+
+```python
+from mtqt import Command, CommandPalette
+
+palette = CommandPalette(parent=window)
+palette.set_commands(
+    [
+        Command("open-scene", "Open Scene", "Load a scene file"),
+        Command("save-scene", "Save Scene"),
+        Command("preferences", "Preferences"),
+    ]
+)
+palette.commandTriggered.connect(print)
+```
+
+## Tag input
+
+`TagInput` is one horizontal row of chips and a line edit. `set_tags` strips whitespace, drops blanks and duplicates, and keeps the first occurrence. It stays silent. Enter or a comma commits the draft. Backspace on an empty draft removes the last tag, and each chip has a remove button. `tagsChanged` emits the new tuple of tags when a commit or a remove changes the row. A blank or duplicate commit does not emit. `set_suggestions` feeds the line edit's popup completer.
+
+```python
+from mtqt import TagInput
+
+tags = TagInput(parent=window)
+tags.set_suggestions(["hero", "prop", "camera"])
+tags.set_tags(["hero"])
+tags.tagsChanged.connect(print)
+```
+
+## Toast stack
+
+`ToastStack` is a vertical stack of transient messages. The newest row is on top. `show_toast` returns a new id. The default timeout is 4 seconds. `timeout_ms` of 0 or less stays until `dismiss`. Each row is a `Toast` frame with a `level` property of `info`, `warning`, or `error`. `dismiss` removes that id. An unknown id does nothing, and a second dismiss does not emit again. `toastDismissed(str)` fires when a toast goes away, from its close button or from its timer. `toasts` lists the ids newest first.
+
+```python
+from mtqt import ToastLevel, ToastStack
+
+stack = ToastStack(parent=window)
+toast_id = stack.show_toast("Saved the scene")
+stack.show_toast("Could not save", level=ToastLevel.ERROR, timeout_ms=0)
+stack.toastDismissed.connect(print)
+stack.dismiss(toast_id)
+```
+
+## Breadcrumb bar
+
+`BreadcrumbBar` is a horizontal row of clickable path segments inside a scroll area, so a long asset path can scroll. `set_crumbs` replaces the row and stays silent. The last segment has the dynamic property `current` set. Marks between segments are labels. Clicking a segment emits `crumbActivated(str)` with that segment's key and does not rebuild the row. A `set_crumbs` call made while that signal is still running waits until the click has returned.
+
+```python
+from mtqt import BreadcrumbBar, Crumb
+
+bar = BreadcrumbBar(parent=window)
+bar.set_crumbs(
+    [
+        Crumb("assets", "Assets"),
+        Crumb("hero", "Hero"),
+        Crumb("body", "Body"),
+    ]
+)
+bar.crumbActivated.connect(print)
+```
+
 ## Node graph
 
 `NodeGraphWidget` draws a directed acyclic graph. Each node is a title and its ports. The graph is a `NodeGraph`. It does not depend on Qt, so a tool can build, validate, and walk the DAG before attaching a view.
