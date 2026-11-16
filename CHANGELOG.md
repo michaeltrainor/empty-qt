@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Scene viewport: the toolbar is now a row of square icon buttons in the
+  style of Maya's Tool Box. Select, Move, Rotate, Scale, World, Local,
+  Edit Pivot, and Snap each get an SVG icon (axis colours red X, green Y,
+  blue Z) shipped in `scene_viewport/icons/`; the active tool shows as a
+  raised square with an accent edge, and the name and hotkey stay in the
+  tooltip. `scene_viewport.icons.tool_icon` renders them.
 - Scene viewport: scenes save and open as OpenUSD (`.usda`, `.usdc`,
   `.usd`) next to JSON. Transforms, primitives, imported meshes (with
   their triangles embedded for other tools), Mesh tab materials as
